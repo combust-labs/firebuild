@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/appministry/firebuild/buildcontext"
+	"github.com/appministry/firebuild/buildcontext/commands"
+	"github.com/appministry/firebuild/remote"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/gofrs/uuid"
@@ -21,6 +23,8 @@ import (
 
 	"github.com/containernetworking/cni/libcni"
 )
+
+type stoppedOK = bool
 
 // Command is the build command declaration.
 var Command = &cobra.Command{
@@ -40,18 +44,22 @@ type buildConfig struct {
 	JailerNumeNode int
 	JailerUID      int
 
-	MachineCNINetworkName    string
-	MachineCPUTemplate       string
-	MachineKernelArgs        string
-	MachineRootFSBase        string
-	MachineRootDrivePartUUID string
-	MachineSSHKey            string
-	MachineSSHUser           string
-	MachineVMLinux           string
-	NetNS                    string
+	MachineCNINetworkName         string
+	MachineCPUTemplate            string
+	MachineKernelArgs             string
+	MachineRootFSBase             string
+	MachineRootDrivePartUUID      string
+	MachineSSHKey                 string
+	MachineSSHDisableAgentForward bool
+	MachineSSHPort                int
+	MachineSSHUser                string
+	MachineVMLinux                string
+	NetNS                         string
 
 	ResourcesCPU int64
 	ResourcesMem int64
+
+	ShutdownGracefulTimeoutSeconds int
 }
 
 type cniConfig struct {
@@ -64,6 +72,8 @@ var (
 	commandConfig        = new(buildConfig)
 	commandCniConfig     = new(cniConfig)
 	rootFSCopyBufferSize = 4 * 1024 * 1024
+	stoppedGracefully    = stoppedOK(true)
+	stoppedForcefully    = stoppedOK(false)
 )
 
 func initFlags() {
@@ -81,10 +91,14 @@ func initFlags() {
 	Command.Flags().StringVar(&commandConfig.MachineKernelArgs, "machine-kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
 	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside")
 	Command.Flags().StringVar(&commandConfig.MachineRootDrivePartUUID, "machine-root-drive-partuuid", "", "Root drive part UUID")
-	Command.Flags().StringVar(&commandConfig.MachineSSHKey, "machine-ssh-key", "", "SSH key")
+	Command.Flags().StringVar(&commandConfig.MachineSSHKey, "machine-ssh-key-file", "", "Path to the SSH key file")
+	Command.Flags().BoolVar(&commandConfig.MachineSSHDisableAgentForward, "machine-ssh-disable-agent-forward", false, "If set, disables SSH agent forward")
+	Command.Flags().IntVar(&commandConfig.MachineSSHPort, "machine-ssh-port", 22, "SSH port")
 	Command.Flags().StringVar(&commandConfig.MachineSSHUser, "machine-ssh-user", "", "SSH user")
 	Command.Flags().StringVar(&commandConfig.MachineVMLinux, "machine-vmlinux", "", "Kernel file path")
 	Command.Flags().StringVar(&commandConfig.NetNS, "netns", "/var/lib/netns", "Network namespace")
+
+	Command.Flags().IntVar(&commandConfig.ShutdownGracefulTimeoutSeconds, "shutdown-graceful-timeout-seconds", 30, "Grafeul shotdown timeout before vmm is stopped forcefully")
 
 	Command.Flags().StringVar(&commandCniConfig.BinDir, "cni-bin-dir", "/opt/cni/bin", "CNI plugins binaries directory")
 	Command.Flags().StringVar(&commandCniConfig.ConfDir, "cni-conf-dir", "/etc/cni/conf.d", "CNI configuration directory")
@@ -121,7 +135,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 	defer func() {
-		fmt.Println("Cleaning up jail directory:", os.RemoveAll(tempDirectory))
+		fmt.Println("Cleaning up temp build directory:", os.RemoveAll(tempDirectory))
 	}()
 
 	// TODO: check that it exists and is regular file
@@ -141,7 +155,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	fmt.Println("Building from", commandConfig.Dockerfile, "using rootfs", sourceRootfs, "copied to", buildRootfs)
 	fmt.Println("Jail directory", jailDirectory, "will be cleaned up automatically")
 	vethIfaceName := getRandomVethName()
-	fmt.Println("Goin to use", vethIfaceName, "as veth interface name")
+	fmt.Println("Going to use", vethIfaceName, "as veth interface name")
 
 	defer func() {
 		fmt.Println("Cleaning up jail directory:", os.RemoveAll(jailDirectory))
@@ -200,26 +214,107 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	vmmCtx, vmmCancel := context.WithCancel(context.Background())
-	defer vmmCancel()
+	defer func() {
+		fmt.Println("Calling cancel on the runVMM context")
+		vmmCancel()
+	}()
 	machine, runErr := runVMM(vmmCtx, fcConfig)
 	if runErr != nil {
 		fmt.Println("Machine did not start, reason:", runErr)
 	}
 
-	defer func() {
-		fmt.Println("Stopping the VMM:", machine.StopVMM())
-		cniCleanupErr := cleanupCNINetwork(commandCniConfig,
-			commandConfig.NetNS,
-			vmmID,
-			commandConfig.MachineCNINetworkName,
-			vethIfaceName)
-		fmt.Println("Cleaning up CNI network interface:", cniCleanupErr)
+	ifaceStaticConfig := fcConfig.NetworkInterfaces[0].StaticConfiguration
+	fmt.Println("Machine is started. IP net address is:",
+		ifaceStaticConfig.IPConfiguration.IPAddr.String(),
+		"IP address is:",
+		ifaceStaticConfig.IPConfiguration.IPAddr.IP.String())
+
+	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
+		SSKKeyFile:          commandConfig.MachineSSHKey,
+		SSHUsername:         commandConfig.MachineSSHUser,
+		IP:                  ifaceStaticConfig.IPConfiguration.IPAddr.IP,
+		Port:                commandConfig.MachineSSHPort,
+		DisableAgentForward: commandConfig.MachineSSHDisableAgentForward,
+	})
+
+	if remoteErr != nil {
+		stopVMM(vmmCtx, machine, vethIfaceName, nil)
+		fmt.Println("Could not connect to remote:", remoteErr)
+		return
+	}
+
+	fmt.Println("Connected via SSH connect to remote:", remoteClient)
+
+	time.Sleep(time.Second * 10)
+
+	initCommands := []commands.Run{
+		{
+			Shell:   commands.Shell{Commands: []string{"/bin/sh", "-c"}},
+			Command: "rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update",
+			Workdir: commands.Workdir{Value: "/"},
+		},
+	}
+
+	if err := buildContext.Build(remoteClient, initCommands...); err != nil {
+		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient)
+		fmt.Println("Failed bootstrapping remote:", remoteErr)
+		return
+	}
+
+	go func() {
+		if stopVMM(vmmCtx, machine, vethIfaceName, remoteClient) == stoppedForcefully {
+			fmt.Println("WARNING: Machine was not stopped gracefully, see previous errors. It's possible that the file system may not be complete. Retry or proceed with caution.")
+		}
 	}()
 
-	fmt.Println("Machine is started. IP address is", fcConfig.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IPAddr.String())
+	machine.Wait(context.Background())
 
-	time.Sleep(time.Second * 15)
+	fmt.Println("Persisting file system...")
 
+	// TODO: handle moving the boostrapped file system here
+
+}
+
+func stopVMM(ctx context.Context, machine *firecracker.Machine, vethIfaceName string, remoteClient remote.ConnectedClient) stoppedOK {
+
+	if remoteClient != nil {
+		fmt.Println("Closing remote client...")
+		fmt.Println("Remote client closed:", remoteClient.Close())
+	}
+
+	shutdownCtx, cancelFunc := context.WithTimeout(ctx, time.Second*time.Duration(commandConfig.ShutdownGracefulTimeoutSeconds))
+	defer cancelFunc()
+	fmt.Println("Stopping VMM gracefully...")
+	chanStopped := make(chan error, 1)
+	go func() {
+		// Ask the machine to shut down so the file system gets flushed
+		// and out changes are written to disk.
+		chanStopped <- machine.Shutdown(shutdownCtx)
+	}()
+
+	stoppedState := stoppedForcefully
+
+	select {
+	case stopErr := <-chanStopped:
+		if stopErr != nil {
+			fmt.Println("VMM stopped with error:", stopErr, "stopping forcefully:", machine.StopVMM())
+		} else {
+			fmt.Println("VMM stopped gracefully")
+			stoppedState = stoppedGracefully
+		}
+	case <-shutdownCtx.Done():
+		fmt.Println("VMM failed to stop gracefully within the timeout, stopping forcefully:", machine.StopVMM())
+	}
+
+	cniCleanupErr := cleanupCNINetwork(commandCniConfig,
+		commandConfig.NetNS,
+		machine.Cfg.VMID,
+		commandConfig.MachineCNINetworkName,
+		vethIfaceName)
+
+	fmt.Println("Cleaning up CNI network interface:", cniCleanupErr)
+
+	return stoppedState
 }
 
 func runVMM(ctx context.Context, fcConfig firecracker.Config) (*firecracker.Machine, error) {

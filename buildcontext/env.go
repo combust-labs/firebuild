@@ -1,7 +1,5 @@
 package buildcontext
 
-import "os"
-
 // --
 
 type buildEnv interface {
@@ -18,14 +16,14 @@ type defaultBuildEnv struct {
 }
 
 func (exp *defaultBuildEnv) expand(value string) string {
-	return os.Expand(value, exp.get)
+	return expand(value, exp.lookup)
 }
 
-func (exp *defaultBuildEnv) get(key string) string {
+func (exp *defaultBuildEnv) lookup(key string) (string, bool) {
 	if value, ok := exp.env[key]; ok {
-		return value
+		return value, true
 	}
-	return ""
+	return "", false
 }
 
 func (exp *defaultBuildEnv) put(key, value string) (string, string) {

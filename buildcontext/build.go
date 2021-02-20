@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/appministry/firebuild/buildcontext/commands"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 )
 
@@ -86,7 +87,7 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 			if len(extracted) != 2 {
 				return nil, fmt.Errorf("the ADD at %d must have exactly 2 elements", child.StartLine)
 			}
-			buildContext.WithInstruction(Add{
+			buildContext.WithInstruction(commands.Add{
 				Source: extracted[0],
 				Target: extracted[1],
 			})
@@ -106,13 +107,13 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 					return nil, fmt.Errorf("the arg at %d is empty", child.StartLine)
 				}
 				name, value := env.put(argsParts[0], strings.Join(argsParts[1:], "="))
-				buildContext.WithInstruction(Arg{
+				buildContext.WithInstruction(commands.Arg{
 					Name:  name,
 					Value: value,
 				})
 			}
 		case "cmd":
-			cmd := Cmd{Values: []string{}}
+			cmd := commands.Cmd{Values: []string{}}
 			current := child.Next
 			for {
 				if current == nil {
@@ -135,12 +136,12 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 			if len(extracted) != 2 {
 				return nil, fmt.Errorf("the cmd at %d must have exactly 2 elements", child.StartLine)
 			}
-			buildContext.WithInstruction(Copy{
+			buildContext.WithInstruction(commands.Copy{
 				Source: extracted[0],
 				Target: extracted[1],
 			})
 		case "entrypoint":
-			entrypoint := Entrypoint{Values: []string{}}
+			entrypoint := commands.Entrypoint{Values: []string{}}
 			current := child.Next
 			for {
 				if current == nil {
@@ -165,7 +166,7 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 			}
 			for i := 0; i < len(extracted); i = i + 2 {
 				name, value := env.put(extracted[i], extracted[i+1])
-				buildContext.WithInstruction(Env{
+				buildContext.WithInstruction(commands.Env{
 					Name:  name,
 					Value: value,
 				})
@@ -176,14 +177,14 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 				if current == nil {
 					break
 				}
-				buildContext.WithInstruction(Expose{RawValue: current.Value})
+				buildContext.WithInstruction(commands.Expose{RawValue: current.Value})
 				current = current.Next
 			}
 		case "from":
 			if child.Next == nil {
 				return nil, fmt.Errorf("expected from value")
 			}
-			buildContext.WithFrom(&From{BaseImage: child.Next.Value})
+			buildContext.WithFrom(&commands.From{BaseImage: child.Next.Value})
 		case "healthcheck":
 			// ignore for now
 			// TODO: these can be for sure used but at a higher level
@@ -201,7 +202,7 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 				return nil, fmt.Errorf("the label at %d is not complete", child.StartLine)
 			}
 			for i := 0; i < len(extracted); i = i + 2 {
-				buildContext.WithInstruction(Label{
+				buildContext.WithInstruction(commands.Label{
 					Key:   extracted[i],
 					Value: env.expand(extracted[i+1]),
 				})
@@ -217,13 +218,13 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 				if current == nil {
 					break
 				}
-				buildContext.WithInstruction(Run{
+				buildContext.WithInstruction(commands.Run{
 					Command: env.expand(current.Value),
 				})
 				current = current.Next
 			}
 		case "shell":
-			shell := Shell{Commands: []string{}}
+			shell := commands.Shell{Commands: []string{}}
 			current := child.Next
 			for {
 				if current == nil {
@@ -239,14 +240,14 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 			if child.Next == nil {
 				return nil, fmt.Errorf("expected user value")
 			}
-			buildContext.WithInstruction(User{Value: child.Next.Value})
+			buildContext.WithInstruction(commands.User{Value: child.Next.Value})
 		case "volume":
 			// ignore
 		case "workdir":
 			if child.Next == nil {
 				return nil, fmt.Errorf("expected workdir value")
 			}
-			buildContext.WithInstruction(Workdir{Value: child.Next.Value})
+			buildContext.WithInstruction(commands.Workdir{Value: child.Next.Value})
 		}
 	}
 

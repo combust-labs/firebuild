@@ -53,6 +53,8 @@ EOF
 
 This will fail because the Dockerfile uses the ADD command. To succeed, clone the owning repository locally and reference the local file.
 
+This example assumes that SSH agent is started and the relevant version SSH key is in the agent.
+
 ```sh
 sudo /usr/local/go/bin/go run ./main.go build \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
@@ -61,5 +63,6 @@ sudo /usr/local/go/bin/go run ./main.go build \
     --dockerfile=https://raw.githubusercontent.com/hashicorp/docker-consul/master/0.X/Dockerfile \
     --machine-cni-network-name=machine-builds \
     --machine-rootfs-base=/firecracker/rootfs \
+    --machine-ssh-user=alpine \
     --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8
 ```
