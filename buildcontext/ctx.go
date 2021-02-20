@@ -2,12 +2,14 @@ package buildcontext
 
 import (
 	"fmt"
+	"strings"
 )
 
 // Build represents the build operation.
 type Build interface {
 	Build() error
 	ExposedPorts() []string
+	From() *From
 	Metadata() map[string]string
 	WithFrom(*From) Build
 	WithInstruction(interface{}) Build
@@ -51,6 +53,13 @@ func (b *defaultBuild) Build() error {
 
 func (b *defaultBuild) ExposedPorts() []string {
 	return b.exposedPorts
+}
+
+func (b *defaultBuild) From() *From {
+	if b.from == nil {
+		return nil
+	}
+	return &From{BaseImage: b.from.BaseImage}
 }
 
 func (b *defaultBuild) Metadata() map[string]string {
@@ -163,9 +172,45 @@ type Expose struct {
 	RawValue string
 }
 
+// StructuredFrom decomposes the base in=mage of From into the org, os and version parts.
+type StructuredFrom struct {
+	org     string
+	os      string
+	version string
+}
+
+// Org returns the org component of the base image.
+func (sf *StructuredFrom) Org() string {
+	return sf.org
+}
+
+// OS returns the OS component of the base image.
+func (sf *StructuredFrom) OS() string {
+	return sf.os
+}
+
+// Version returns the base image version.
+func (sf *StructuredFrom) Version() string {
+	return sf.version
+}
+
 // From represents the FROM instruction.
 type From struct {
 	BaseImage string
+}
+
+// ToStructuredFrom extracts structured info from the base image string.
+func (f *From) ToStructuredFrom() *StructuredFrom {
+	structuredForm := &StructuredFrom{org: "_"}
+	imageName := f.BaseImage
+	if strings.Contains(f.BaseImage, "/") {
+		structuredForm.org = strings.Split(f.BaseImage, "/")[0]
+		imageName = strings.TrimPrefix(imageName, structuredForm.org+"/")
+	}
+	osAndVersion := strings.Split(imageName, ":")
+	structuredForm.os = osAndVersion[0]
+	structuredForm.version = osAndVersion[1]
+	return structuredForm
 }
 
 // Label represents the LABEL instruction.
