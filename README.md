@@ -56,7 +56,8 @@ This will fail because the Dockerfile uses the ADD command. To succeed, clone th
 This example assumes that SSH agent is started and the relevant version SSH key is in the agent.
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go build \
+sudo bash
+/usr/local/go/bin/go run ./main.go build \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
@@ -64,7 +65,56 @@ sudo /usr/local/go/bin/go run ./main.go build \
     --machine-cni-network-name=machine-builds \
     --machine-rootfs-base=/firecracker/rootfs \
     --machine-ssh-user=alpine \
-    --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8
+    --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
+    --init-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update'
+```
+
+## git+http(s):// URL
+
+It's possible to reference a `Dockerfile` residing in the git repository available under a HTTP(s) URL. Here's an example:
+
+```sh
+/usr/local/go/bin/go run ./main.go build \
+    --binary-firecracker=$(readlink /usr/bin/firecracker) \
+    --binary-jailer=$(readlink /usr/bin/jailer) \
+    --chroot-base=/srv/jailer \
+    --dockerfile=git+https://github.com/hashicorp/docker-consul.git:/0.X/Dockerfile#master \
+    --machine-cni-network-name=machine-builds \
+    --machine-rootfs-base=/firecracker/rootfs \
+    --machine-ssh-user=alpine \
+    --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
+    --init-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
+    --log-as-json
+```
+
+The URL format is:
+
+```
+git+http(s)://host:port/path/to/repo.git:/path/to/Dockerfile[#<commit-hash | branch-name | tag-name>]
+```
+
+And will be processed as:
+
+- path `/path/to/repo.git:/path/to/Dockerfile` will be split by `:` and must contain both sides
+  - `/path/to/repo.git` is the git repository path
+  - `/path/to/Dockerfile` is the path to the `Dockerfile` in the repository and after clone an checkout must point to a file
+- optional `#fragment` may be a comit hash, a branch name or a tag name
+  - if no `#fragment` is given, the program will use the default cloned branch, check the remote to find out what is it
+- the cloned repository will have a single remote and the first remote wil be used
+
+Git repositories support file modes and the files from the `ADD` and `COPY` directives, will have file info modes applied. Example:
+
+```json
+{
+    "@level":"debug",
+    "@message":"Running remote command",
+    "@module":"build.remote-client.connected-remote-client",
+    "@timestamp":"2021-02-21T13:46:49.152941Z",
+    "command":"sudo mkdir -p / \u0026\u0026 sudo /bin/sh -c 'chmod 0755 /tmp/QdWsoItNoHEOgarVrHGHzWBrEzDhpHMw/TfRemDQEtpRtGKbDEjlPcJvNGDOxJSNu'",
+    "ip-address":"192.168.128.56",
+    "veth-name":"vethkBkhSAovlpr",
+    "vmm-id":"2ad5e481be144d3da7181abf124e23cf"
+}
 ```
 
 ## Caveats when building from the URL

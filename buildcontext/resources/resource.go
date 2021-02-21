@@ -117,8 +117,8 @@ func (dr *defaultResolver) resolveResource(originalSource, resourcePath, targetP
 	}
 
 	newPath := filepath.Join(filepath.Dir(originalSource), resourcePath)
-	if !strings.HasPrefix(newPath, originalSource) {
-		return nil, fmt.Errorf("resource failed: resolved '%s' not in the context of '%s'", newPath, originalSource)
+	if !strings.HasPrefix(newPath, filepath.Dir(originalSource)) {
+		return nil, fmt.Errorf("resource failed: resolved '%s' not in the context of '%s'", newPath, filepath.Dir(originalSource))
 	}
 	statResult, statErr := os.Stat(newPath)
 	if statErr != nil {

@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/containernetworking/cni v0.8.0
 	github.com/firecracker-microvm/firecracker-go-sdk v0.22.0
+	github.com/go-git/go-git/v5 v5.2.0
 	github.com/gofrs/uuid v4.0.0+incompatible
 	github.com/hashicorp/go-hclog v0.15.0
 	github.com/moby/buildkit v0.8.1

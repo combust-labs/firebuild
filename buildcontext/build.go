@@ -6,19 +6,93 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/appministry/firebuild/buildcontext/commands"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
+
+	git "github.com/go-git/go-git/v5"
 )
 
 // NewFromString creates a new build context from string.
-// The string value can be:
-// - literal Dockerfile content
-// - http or http URL
+//
+// - literal Dockerfile content, ADD and COPY will not work
+// - http:// or httpL// URL
+// - git+http:// and git+https:// URL
+//   the format is: git+http(s)://host:port/path/to/repo.git:/path/to/Dockerfile[#<commit-hash | branch-name | tag-name>]
 // - absolute path to the local file
-func NewFromString(input string) (Build, error) {
+func NewFromString(input string, tempDirectory string) (Build, error) {
+
+	if strings.HasPrefix(input, "git+http://") || strings.HasPrefix(input, "git+https://") {
+		u, _ := url.Parse(input)
+
+		branchToCheckout := u.Fragment
+		pathParts := strings.Split(u.Path, ":")
+		if len(pathParts) != 2 {
+			return nil, fmt.Errorf("invalid path: %s, expected /org/repo.git:/file/in/repo", u.Path)
+		}
+
+		pathInRepo := pathParts[1]
+		u.Path = pathParts[0]
+		u.Fragment = ""
+
+		repoURL := strings.Replace(strings.Replace(u.String(), "git+http://", "http://", 1), "git+https://", "https://", 1)
+
+		repoDestDir := filepath.Join(tempDirectory, "sources")
+		repo, err := git.PlainClone(repoDestDir, false, &git.CloneOptions{
+			URL:      repoURL,
+			Progress: os.Stdout,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed clone: %+v", err)
+		}
+
+		if branchToCheckout != "" {
+			remotes, err := repo.Remotes()
+			if err != nil {
+				return nil, fmt.Errorf("failed listing remotes: %+v", err)
+			}
+			refs, err := remotes[0].List(&git.ListOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed listing remotes: %+v", err)
+			}
+			for _, ref := range refs {
+				if ref.Name().IsBranch() || ref.Name().IsTag() {
+					if ref.Hash().String() == branchToCheckout || strings.HasSuffix(ref.Name().String(), fmt.Sprintf("/%s", branchToCheckout)) {
+						worktree, err := repo.Worktree()
+						if err != nil {
+							return nil, fmt.Errorf("failed fetching worktree: %+v", err)
+						}
+						if err := worktree.Checkout(&git.CheckoutOptions{
+							Hash: ref.Hash(),
+						}); err != nil {
+							return nil, fmt.Errorf("failed checkout %s: %+v", branchToCheckout, err)
+						}
+						break
+					}
+				}
+			}
+		}
+
+		// the Dockerfile is basically:
+		filePath := filepath.Join(repoDestDir, pathInRepo)
+		statResult, statErr := os.Stat(filePath)
+		if statErr != nil {
+			return nil, statErr
+		}
+		if statResult.IsDir() {
+			return nil, &ErrorIsDirectory{Input: filePath}
+		}
+		bytes, err := ioutil.ReadFile(filePath)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+
+		return NewFromBytesWithOriginalSource(bytes, filePath)
+	}
 
 	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
 		httpResponse, err := http.Get(input)

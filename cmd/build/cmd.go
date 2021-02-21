@@ -43,6 +43,8 @@ type buildConfig struct {
 	ChrootBase        string
 	Dockerfile        string
 
+	InitCommands []string
+
 	JailerGID      int
 	JailerNumeNode int
 	JailerUID      int
@@ -85,6 +87,8 @@ func initFlags() {
 	Command.Flags().StringVar(&commandConfig.BinaryJailer, "binary-jailer", "", "Path to the Firecracker Jailer binary to use")
 	Command.Flags().StringVar(&commandConfig.ChrootBase, "chroot-base", "/srv/jailer", "chroot base directory")
 	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
+
+	Command.Flags().StringArrayVar(&commandConfig.InitCommands, "init-command", []string{}, "OS specific init commands to run before any Dockerfile command.")
 
 	Command.Flags().IntVar(&commandConfig.JailerGID, "jailer-gid", 0, "Jailer GID value")
 	Command.Flags().IntVar(&commandConfig.JailerNumeNode, "jailer-numa-node", 0, "Jailer NUMA node")
@@ -129,8 +133,14 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	rootLogger := configs.NewLogger("build", logConfig)
 
+	tempDirectory, err := ioutil.TempDir("", "")
+	if err != nil {
+		rootLogger.Error("Failed creating temporary build directory", "reason", err)
+		os.Exit(1)
+	}
+
 	// The first thing to do is to resolve the Dockerfile:
-	buildContext, err := buildcontext.NewFromString(commandConfig.Dockerfile)
+	buildContext, err := buildcontext.NewFromString(commandConfig.Dockerfile, tempDirectory)
 	if err != nil {
 		rootLogger.Error("failed parsing Dockerfile", "reason", err)
 		os.Exit(1)
@@ -139,15 +149,10 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	base := buildContext.From()
 	if base == nil {
 		rootLogger.Error("no base to build from")
+		cleanup.exec() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
 	structuredBase := base.ToStructuredFrom()
-
-	tempDirectory, err := ioutil.TempDir("", "")
-	if err != nil {
-		rootLogger.Error("Failed creating temporary build directory", "reason", err)
-		os.Exit(1)
-	}
 
 	cleanup.add(func() {
 		rootLogger.Info("cleaning up temp build directory")
@@ -277,8 +282,9 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	// TODO: replace with VMM based egress testing
 	time.Sleep(time.Second * 10)
 
-	initCommands := []commands.Run{
-		commands.RunWithDefaults("rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update"),
+	initCommands := []commands.Run{}
+	for _, initCmd := range commandConfig.InitCommands {
+		initCommands = append(initCommands, commands.RunWithDefaults(initCmd))
 	}
 
 	if buildErr := buildContext.WithLogger(vmmLogger.Named("builder")).Build(remoteClient, initCommands...); err != nil {

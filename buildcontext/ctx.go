@@ -41,7 +41,7 @@ type defaultBuild struct {
 
 func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands ...commands.Run) error {
 
-	buildLogger := b.logger.With("from", b.from.BaseImage)
+	b.logger.Info("building from", "base", b.from.BaseImage)
 
 	// validate resources first:
 	for _, command := range b.instructions {
@@ -49,12 +49,14 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands .
 		case commands.Add:
 			resolvedResource, err := b.resolver.ResolveAdd(tcommand)
 			if err != nil {
+				b.logger.Error("failed resolving ADD resource", "reason", err)
 				return err
 			}
 			b.resolvedResources[tcommand.Source] = resolvedResource
 		case commands.Copy:
 			resolvedResource, err := b.resolver.ResolveCopy(tcommand)
 			if err != nil {
+				b.logger.Error("failed resolving COPY resource", "reason", err)
 				return err
 			}
 			b.resolvedResources[tcommand.Source] = resolvedResource
@@ -70,27 +72,27 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands .
 		switch tcommand := command.(type) {
 		case commands.Add:
 			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
-				buildLogger.Info("Putting ADD resource", "source", tcommand.Source)
+				b.logger.Info("Putting ADD resource", "source", tcommand.Source)
 				if err := remoteClient.PutResource(resource); err != nil {
-					buildLogger.Error("PutResource ADD resource failed", "source", tcommand.Source, "reason", err)
+					b.logger.Error("PutResource ADD resource failed", "source", tcommand.Source, "reason", err)
 					return err
 				}
 			} else {
-				buildLogger.Error("resource ADD type required but not resolved", "source", tcommand.Source)
+				b.logger.Error("resource ADD type required but not resolved", "source", tcommand.Source)
 			}
 		case commands.Copy:
-			buildLogger.Info("Putting COPY resource", "source", tcommand.Source)
+			b.logger.Info("Putting COPY resource", "source", tcommand.Source)
 			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
 				if err := remoteClient.PutResource(resource); err != nil {
-					buildLogger.Error("PutResource COPY resource failed", "source", tcommand.Source, "reason", err)
+					b.logger.Error("PutResource COPY resource failed", "source", tcommand.Source, "reason", err)
 					return err
 				}
 			} else {
-				buildLogger.Error("resource COPY type required but not resolved", "source", tcommand.Source)
+				b.logger.Error("resource COPY type required but not resolved", "source", tcommand.Source)
 			}
 		case commands.Run:
 			if err := remoteClient.RunCommand(tcommand); err != nil {
-				buildLogger.Error("RunCommand failed", "reason", err)
+				b.logger.Error("RunCommand failed", "reason", err)
 				return err
 			}
 		}
