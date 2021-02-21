@@ -120,6 +120,13 @@ type User struct {
 	Value string
 }
 
+// Volume represents the VOLUME instruction.
+type Volume struct {
+	Workdir Workdir
+	User    User
+	Values  []string
+}
+
 // Workdir represents the WORKDIR instruction.
 type Workdir struct {
 	Value string

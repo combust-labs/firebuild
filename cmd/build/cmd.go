@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -43,7 +44,12 @@ type buildConfig struct {
 	ChrootBase        string
 	Dockerfile        string
 
-	InitCommands []string
+	EgressNoWait             bool
+	EgressTestTarget         string
+	EgressTestTimeoutSeconds int
+
+	PostBuildCommands []string
+	PreBuildCommands  []string
 
 	JailerGID      int
 	JailerNumeNode int
@@ -64,7 +70,11 @@ type buildConfig struct {
 	ResourcesCPU int64
 	ResourcesMem int64
 
+	ServiceFileInstaller string
+
 	ShutdownGracefulTimeoutSeconds int
+
+	Tag string
 }
 
 type cniConfig struct {
@@ -83,17 +93,35 @@ var (
 )
 
 func initFlags() {
+	// CNI settings:
+	Command.Flags().StringVar(&commandCniConfig.BinDir, "cni-bin-dir", "/opt/cni/bin", "CNI plugins binaries directory")
+	Command.Flags().StringVar(&commandCniConfig.ConfDir, "cni-conf-dir", "/etc/cni/conf.d", "CNI configuration directory")
+	Command.Flags().StringVar(&commandCniConfig.CacheDir, "cni-cache-dir", "/var/lib/cni", "CNI cache directory")
+	// Log settings:
+	Command.Flags().StringVar(&logConfig.LogLevel, "log-level", "debug", "Log level")
+	Command.Flags().BoolVar(&logConfig.LogAsJSON, "log-as-json", false, "Log as JSON")
+	Command.Flags().BoolVar(&logConfig.LogColor, "log-color", false, "Log in color")
+	Command.Flags().BoolVar(&logConfig.LogForceColor, "log-force-color", false, "Force colored log output")
+	// Egress testing settings:
+	Command.Flags().BoolVar(&commandConfig.EgressNoWait, "egress-no-wait", false, "When set, the build process will not wait for the VMM to have egress confirmed")
+	Command.Flags().StringVar(&commandConfig.EgressTestTarget, "egress-test-target", "1.1.1.1", "Address to use for VMM egress connectivity test; IP address or FQDN, egress is tested with the ping command")
+	Command.Flags().IntVar(&commandConfig.EgressTestTimeoutSeconds, "egress-test-timeout-seconds", 15, "Maxmim amount of time to wait for egress connectivity before failing the build")
+	// Firecracker / Jailer settings:
 	Command.Flags().StringVar(&commandConfig.BinaryFirecracker, "binary-firecracker", "", "Path to the Firecracker binary to use")
 	Command.Flags().StringVar(&commandConfig.BinaryJailer, "binary-jailer", "", "Path to the Firecracker Jailer binary to use")
 	Command.Flags().StringVar(&commandConfig.ChrootBase, "chroot-base", "/srv/jailer", "chroot base directory")
-	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
-
-	Command.Flags().StringArrayVar(&commandConfig.InitCommands, "init-command", []string{}, "OS specific init commands to run before any Dockerfile command.")
-
 	Command.Flags().IntVar(&commandConfig.JailerGID, "jailer-gid", 0, "Jailer GID value")
 	Command.Flags().IntVar(&commandConfig.JailerNumeNode, "jailer-numa-node", 0, "Jailer NUMA node")
 	Command.Flags().IntVar(&commandConfig.JailerUID, "jailer-uid", 0, "Jailer UID value")
-
+	Command.Flags().StringVar(&commandConfig.NetNS, "netns", "/var/lib/netns", "Network namespace")
+	// Bootstrap settings:
+	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
+	Command.Flags().StringArrayVar(&commandConfig.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
+	Command.Flags().StringArrayVar(&commandConfig.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
+	Command.Flags().StringVar(&commandConfig.ServiceFileInstaller, "service-file-installer", "", "Local path to the program to upload to the VMM and install the service file")
+	Command.Flags().IntVar(&commandConfig.ShutdownGracefulTimeoutSeconds, "shutdown-graceful-timeout-seconds", 30, "Grafeul shotdown timeout before vmm is stopped forcefully")
+	Command.Flags().StringVar(&commandConfig.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
+	// Machine and resources settings:
 	Command.Flags().StringVar(&commandConfig.MachineCNINetworkName, "machine-cni-network-name", "", "CNI network within which the build should run. It's recommended to use a dedicated network for build process")
 	Command.Flags().StringVar(&commandConfig.MachineCPUTemplate, "machine-cpu-template", "", "CPU template (empty, C2 or T3)")
 	Command.Flags().StringVar(&commandConfig.MachineKernelArgs, "machine-kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
@@ -104,19 +132,6 @@ func initFlags() {
 	Command.Flags().IntVar(&commandConfig.MachineSSHPort, "machine-ssh-port", 22, "SSH port")
 	Command.Flags().StringVar(&commandConfig.MachineSSHUser, "machine-ssh-user", "", "SSH user")
 	Command.Flags().StringVar(&commandConfig.MachineVMLinux, "machine-vmlinux", "", "Kernel file path")
-	Command.Flags().StringVar(&commandConfig.NetNS, "netns", "/var/lib/netns", "Network namespace")
-
-	Command.Flags().IntVar(&commandConfig.ShutdownGracefulTimeoutSeconds, "shutdown-graceful-timeout-seconds", 30, "Grafeul shotdown timeout before vmm is stopped forcefully")
-
-	Command.Flags().StringVar(&commandCniConfig.BinDir, "cni-bin-dir", "/opt/cni/bin", "CNI plugins binaries directory")
-	Command.Flags().StringVar(&commandCniConfig.ConfDir, "cni-conf-dir", "/etc/cni/conf.d", "CNI configuration directory")
-	Command.Flags().StringVar(&commandCniConfig.CacheDir, "cni-cache-dir", "/var/lib/cni", "CNI cache directory")
-
-	Command.Flags().StringVar(&logConfig.LogLevel, "log-level", "debug", "Log level")
-	Command.Flags().BoolVar(&logConfig.LogAsJSON, "log-as-json", false, "Log as JSON")
-	Command.Flags().BoolVar(&logConfig.LogColor, "log-color", false, "Log in color")
-	Command.Flags().BoolVar(&logConfig.LogForceColor, "log-force-color", false, "Force colored log output")
-
 	Command.Flags().Int64Var(&commandConfig.ResourcesCPU, "resources-cpu", 1, "Number of CPU for the build VMM")
 	Command.Flags().Int64Var(&commandConfig.ResourcesMem, "resources-mem", 128, "Amount of memory for the VMM")
 }
@@ -132,6 +147,16 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	defer cleanup.exec()
 
 	rootLogger := configs.NewLogger("build", logConfig)
+
+	if commandConfig.Tag == "" {
+		rootLogger.Error("--tag is required")
+		os.Exit(1)
+	}
+
+	if !isTagValid(commandConfig.Tag) {
+		rootLogger.Error("--tag value is invalid", "tag", commandConfig.Tag)
+		os.Exit(1)
+	}
 
 	tempDirectory, err := ioutil.TempDir("", "")
 	if err != nil {
@@ -279,15 +304,33 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmLogger.Info("Connected via SSH")
 
-	// TODO: replace with VMM based egress testing
-	time.Sleep(time.Second * 10)
-
-	initCommands := []commands.Run{}
-	for _, initCmd := range commandConfig.InitCommands {
-		initCommands = append(initCommands, commands.RunWithDefaults(initCmd))
+	if !commandConfig.EgressNoWait {
+		egressCtx, egressWaitCancelFunc := context.WithTimeout(vmmCtx, time.Second*time.Duration(commandConfig.EgressTestTimeoutSeconds))
+		defer egressWaitCancelFunc()
+		if err := remoteClient.WaitForEgress(egressCtx, commandConfig.EgressTestTarget); err != nil {
+			stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+			vmmLogger.Error("Did not get egress connectivity within a timeout", "reason", err)
+			return
+		}
+	} else {
+		vmmLogger.Debug("Egress test explicitly skipped")
 	}
 
-	if buildErr := buildContext.WithLogger(vmmLogger.Named("builder")).Build(remoteClient, initCommands...); err != nil {
+	postBuildCommands := []commands.Run{}
+	for _, cmd := range commandConfig.PostBuildCommands {
+		postBuildCommands = append(postBuildCommands, commands.RunWithDefaults(cmd))
+	}
+	preBuildCommands := []commands.Run{}
+	for _, cmd := range commandConfig.PreBuildCommands {
+		preBuildCommands = append(preBuildCommands, commands.RunWithDefaults(cmd))
+	}
+
+	if buildErr := buildContext.
+		WithLogger(vmmLogger.Named("builder")).
+		WithServiceInstaller(commandConfig.ServiceFileInstaller).
+		WithPostBuildCommands(postBuildCommands...).
+		WithPreBuildCommands(preBuildCommands...).
+		Build(remoteClient); err != nil {
 		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
 		vmmLogger.Error("Failed boostrapping remote via SSH", "reason", buildErr)
 		return
@@ -305,7 +348,56 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmLogger.Info("Machine to stopped. Persisting the file system...")
 
-	// TODO: handle moving the boostrapped file system here
+	ok, org, name, version := tagDecompose(commandConfig.Tag)
+	if !ok {
+		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+		vmmLogger.Error("Tag could not be decomposed", "tag", commandConfig.Tag)
+		return
+	}
+
+	fsFileName := filepath.Base(buildRootfs)
+	fileSystemTargetDirectory := filepath.Join(commandConfig.MachineRootFSBase, "_builds", org, name, version)
+	fileSystemTarget := filepath.Join(fileSystemTargetDirectory, fsFileName)
+
+	if err := os.MkdirAll(filepath.Dir(fileSystemTarget), 0644); err != nil {
+		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+		vmmLogger.Error("Failed creating final build target directory", "reason", err)
+		return
+	}
+
+	if copyErr := copyFile(filepath.Join(jailDirectory, "root", fsFileName), fileSystemTarget, 4*1024*1024); copyErr != nil {
+		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+		vmmLogger.Error("Failed copying built file", "tag", commandConfig.Tag)
+		return
+	}
+
+	// write the metadata to a JSON file:
+	metadata := map[string]interface{}{
+		"labels":         buildContext.Metadata(),
+		"ports":          buildContext.ExposedPorts(),
+		"created-at-utc": time.Now().UTC().Unix(),
+		"build-context": map[string]interface{}{
+			"cni-config": &commandCniConfig,
+			"config":     &commandConfig,
+		},
+	}
+
+	metadataFileName := filepath.Join(fileSystemTargetDirectory, "metadata.json")
+
+	metadataJSONBytes, jsonErr := json.MarshalIndent(&metadata, "", "  ")
+	if jsonErr != nil {
+		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+		vmmLogger.Error("Machine metadata could not be serialized to JSON", "metadata", metadata, "reason", jsonErr)
+		return
+	}
+
+	if writeErr := ioutil.WriteFile(metadataFileName, metadataJSONBytes, 0644); writeErr != nil {
+		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+		vmmLogger.Error("Machine metadata not written to file", "metadata", metadata, "reason", jsonErr)
+		return
+	}
+
+	vmmLogger.Info("Build completed successfully. Rootfs tagged.", "storage-path", fileSystemTarget)
 
 }
 

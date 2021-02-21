@@ -148,3 +148,14 @@ func (dr *defaultResolver) resolveResource(originalSource, resourcePath, targetP
 		targetWorkdir: targetWorkdir,
 		targetUser:    targetUser}, nil
 }
+
+// NewResolvedFileResource creates a resolved resource from input information.
+func NewResolvedFileResource(data []byte, mode fs.FileMode, targetPath string, workdir commands.Workdir, user commands.User) ResolvedResource {
+	return &defaultResolvedResource{data: data,
+		isDir:         false,
+		resolved:      "",
+		targetMode:    mode,
+		targetPath:    targetPath,
+		targetWorkdir: workdir,
+		targetUser:    user}
+}

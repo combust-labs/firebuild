@@ -156,11 +156,15 @@ func Connect(ctx context.Context, cfg ConnectConfig, logger hclog.Logger) (Conne
 
 // -- Connected client:
 
+// EgressTestTarget represents an IP of FQDN used for the egress test.
+type EgressTestTarget = string
+
 // ConnectedClient contains connected SSH and SFTP clients.
 type ConnectedClient interface {
 	Close() error
 	RunCommand(commands.Run) error
 	PutResource(resources.ResolvedResource) error
+	WaitForEgress(context.Context, EgressTestTarget) error
 }
 
 type defaultConnectedClient struct {
@@ -202,14 +206,27 @@ func (dcc *defaultConnectedClient) RunCommand(command commands.Run) error {
 	}
 	go io.Copy(os.Stderr, stderr)
 
-	remoteCommand := fmt.Sprintf("sudo mkdir -p %s && sudo %s '%s'",
+	remoteCommand := fmt.Sprintf("sudo mkdir -p %s && sudo %s '%s'\n",
 		command.Workdir.Value,
 		strings.Join(command.Shell.Commands, " "),
 		strings.ReplaceAll(command.Command, "'", "''"))
 
 	dcc.logger.Debug("Running remote command", "command", remoteCommand)
-
-	return sshSession.Run(remoteCommand)
+	if err := sshSession.Start(remoteCommand); err != nil {
+		return fmt.Errorf("Unable to start the SSH session: %v", err)
+	}
+	defer sshSession.Close()
+	if sessionErr := sshSession.Wait(); sessionErr != nil {
+		exitErr, ok := sessionErr.(*ssh.ExitError)
+		if ok {
+			dcc.logger.Error("Remote command finished with error",
+				"exit-status", exitErr.ExitStatus(),
+				"exit-message", exitErr.Error(),
+				"command", remoteCommand)
+		}
+		return sessionErr
+	}
+	return nil
 }
 
 func (dcc *defaultConnectedClient) PutResource(resource resources.ResolvedResource) error {
@@ -273,7 +290,7 @@ func (dcc *defaultConnectedClient) PutResource(resource resources.ResolvedResour
 		}
 
 		// 5. Move it to the final destination:
-		destination := filepath.Dir(filepath.Join(resource.TargetWorkdir().Value, resource.TargetPath()))
+		destination := filepath.Join(resource.TargetWorkdir().Value, resource.TargetPath())
 		destinationDirectory := filepath.Dir(destination)
 		runErrMove := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && mv '%s' '%s'", destinationDirectory, tempDestination, destination)))
 		if runErrMove != nil {
@@ -283,7 +300,9 @@ func (dcc *defaultConnectedClient) PutResource(resource resources.ResolvedResour
 		// 6. Clean up
 		runErrCleanup := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("rm -r '%s'", bootstrapDir)))
 		if runErrCleanup != nil {
-			// TODO: log warning
+			dcc.logger.Warn("WARNING: failed cleaning up the bootstrap directory",
+				"bootstrap-dir", bootstrapDir,
+				"reason", runErrCleanup)
 		}
 
 		dcc.logger.Debug("Resource moved to final destination",
@@ -294,4 +313,42 @@ func (dcc *defaultConnectedClient) PutResource(resource resources.ResolvedResour
 		return nil
 	}
 	return fmt.Errorf("not implemented: directory put")
+}
+
+func (dcc *defaultConnectedClient) WaitForEgress(ctx context.Context, target EgressTestTarget) error {
+
+	chanTimeout := make(chan struct{}, 1)
+	chanOK := make(chan struct{}, 1)
+
+	attempt := 1
+	benchStart := time.Now()
+
+	go func() {
+		for {
+			dcc.logger.Info("waiting for egress", "attempt", attempt)
+			if ctx.Err() != nil {
+				close(chanTimeout)
+				return
+			}
+			if cmdErr := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("ping %s -c 1 -i 0.5", target))); cmdErr != nil {
+				dcc.logger.Warn("egress not ready", "attempt", attempt)
+				attempt = attempt + 1
+				<-time.After(time.Millisecond * 100)
+				continue
+			}
+			dcc.logger.Info("egress ready", "attempt", attempt, "after", time.Now().Sub(benchStart).String())
+			close(chanOK)
+			return
+		}
+	}()
+
+	select {
+	case <-chanTimeout:
+		close(chanOK)
+		return fmt.Errorf("waiting for egress timeoud out")
+	case <-chanOK:
+		close(chanTimeout)
+		return nil
+	}
+
 }

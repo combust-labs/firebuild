@@ -329,7 +329,16 @@ func NewFromParserResult(parserResult *parser.Result, originalSource string) (Bu
 			}
 			buildContext.WithInstruction(commands.User{Value: child.Next.Value})
 		case "volume":
-			// ignore
+			vols := commands.Volume{Values: []string{}}
+			current := child.Next
+			for {
+				if current == nil {
+					break
+				}
+				vols.Values = append(vols.Values, current.Value)
+				current = current.Next
+			}
+			buildContext.WithInstruction(vols)
 		case "workdir":
 			if child.Next == nil {
 				return nil, fmt.Errorf("expected workdir value")

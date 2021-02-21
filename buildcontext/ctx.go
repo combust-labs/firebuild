@@ -1,7 +1,13 @@
 package buildcontext
 
 import (
+	"fmt"
+	"io"
+	"io/fs"
+	"io/ioutil"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/appministry/firebuild/buildcontext/commands"
 	"github.com/appministry/firebuild/buildcontext/resources"
@@ -9,16 +15,21 @@ import (
 	"github.com/hashicorp/go-hclog"
 )
 
+const etcDirectory = "/etc/firebuild"
+
 // Build represents the build operation.
 type Build interface {
-	Build(remote.ConnectedClient, ...commands.Run) error
+	Build(remote.ConnectedClient) error
 	ExposedPorts() []string
 	From() *commands.From
 	Metadata() map[string]string
-	WithLogger(hclog.Logger) Build
-	WithResolver(resources.Resolver) Build
 	WithFrom(*commands.From) Build
 	WithInstruction(interface{}) Build
+	WithLogger(hclog.Logger) Build
+	WithPostBuildCommands(...commands.Run) Build
+	WithPreBuildCommands(...commands.Run) Build
+	WithResolver(resources.Resolver) Build
+	WithServiceInstaller(string) Build
 }
 
 type defaultBuild struct {
@@ -35,11 +46,15 @@ type defaultBuild struct {
 	instructions      []interface{}
 	logger            hclog.Logger
 	resolver          resources.Resolver
+	serviceInstaller  string
+
+	postBuildCommands []commands.Run
+	preBuildCommands  []commands.Run
 
 	resolvedResources map[string]resources.ResolvedResource
 }
 
-func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands ...commands.Run) error {
+func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 
 	b.logger.Info("building from", "base", b.from.BaseImage)
 
@@ -63,11 +78,12 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands .
 		}
 	}
 
-	for _, initCommand := range initCommands {
-		if err := remoteClient.RunCommand(initCommand); err != nil {
+	for _, cmd := range b.preBuildCommands {
+		if err := remoteClient.RunCommand(cmd); err != nil {
 			return err
 		}
 	}
+
 	for _, command := range b.instructions {
 		switch tcommand := command.(type) {
 		case commands.Add:
@@ -95,16 +111,117 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands .
 				b.logger.Error("RunCommand failed", "reason", err)
 				return err
 			}
+		case commands.Volume:
+			for _, vol := range tcommand.Values {
+				run := commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s'", vol))
+				run.User = tcommand.User
+				run.Workdir = tcommand.Workdir
+				if err := remoteClient.RunCommand(run); err != nil {
+					b.logger.Error("RunCommand for VOLUME command failed", "reason", err)
+					return err
+				}
+			}
 		}
 	}
-	/*
-		fmt.Println("Metadata is", b.Metadata())
-		fmt.Println("Exposed ports", b.ExposedPorts())
-		fmt.Println("OS Service should execute:")
-		fmt.Println(" =====> Command: ", b.currentEntrypoint.Values)
-		fmt.Println(" =====> Arguments: ", b.currentCmd)
-		fmt.Println(fmt.Sprintf(" =====> As user %q, Using shell %q, in directory %q", b.currentEntrypoint.User.Value, b.currentEntrypoint.Shell.Commands, b.currentEntrypoint.Workdir.Value))
-	*/
+
+	// always create the service env file:
+	serviceEnv := []string{
+		fmt.Sprintf("SERVICE_WORKDIR=\"%s\"", b.currentEntrypoint.Workdir.Value),
+		fmt.Sprintf("SERVICE_SHELL=\"%s\"", strings.Join(mapShellString(b.currentEntrypoint.Shell.Commands), " ")),
+		fmt.Sprintf("SERVICE_ENTRYPOINT=\"%s\"", strings.Join(mapShellString(b.currentEntrypoint.Values), " ")),
+		fmt.Sprintf("SERVICE_CMDS=\"%s\"", strings.Join(mapShellString(b.currentCmd.Values), " ")),
+		fmt.Sprintf("SERVICE_USER=\"%s\"", b.currentEntrypoint.User.Value),
+	}
+
+	b.logger.Info("Creating bootstrap data location", "location", etcDirectory)
+
+	if err := remoteClient.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s'", etcDirectory))); err != nil {
+		b.logger.Error("BOOTSTRAP INCOMPLETE: Failed creating firebuild bootstrap data directory",
+			"directory", etcDirectory,
+			"reason", err,
+			"service-env", serviceEnv)
+		return err
+	}
+
+	b.logger.Info("Uploading the service environment file")
+
+	if err := remoteClient.PutResource(resources.
+		NewResolvedFileResource([]byte(strings.Join(serviceEnv, "\n")+"\n"),
+			fs.FileMode(0644),
+			filepath.Join(etcDirectory, "cmd.env"),
+			commands.DefaultWorkdir(),
+			commands.DefaultUser())); err != nil {
+		b.logger.Error("BOOTSTRAP INCOMPLETE: Failed uploading the service environment file",
+			"reason", err,
+			"service-env", serviceEnv)
+		return err
+	}
+
+	// if we succeeded and we have the installer file ... but only if we have a file...
+	if b.serviceInstaller != "" {
+
+		b.logger.Info("Validating service installer file")
+
+		// check if it exists and is a file:
+		stat, statErr := os.Stat(b.serviceInstaller)
+		if statErr != nil {
+			b.logger.Error("BOOTSTRAP INCOMPLETE: Failed service installer stat",
+				"reason", statErr,
+				"service-env", serviceEnv)
+			return statErr
+		}
+		if stat.IsDir() {
+			b.logger.Error("BOOTSTRAP INCOMPLETE: Service installer points to a directory",
+				"service-env", serviceEnv)
+			return fmt.Errorf("directory: expected file: %s", b.serviceInstaller)
+		}
+		installerBytes, readErr := ioutil.ReadFile(b.serviceInstaller)
+		if readErr != nil && readErr != io.EOF {
+			b.logger.Error("BOOTSTRAP INCOMPLETE: Failed reading the installer file",
+				"reason", readErr,
+				"service-env", serviceEnv)
+			return readErr
+		}
+
+		b.logger.Info("Uploading service installer file")
+
+		// upload the installer:
+		installerPath := filepath.Join(etcDirectory, "installer.sh")
+		if err := remoteClient.PutResource(resources.
+			NewResolvedFileResource([]byte(installerBytes),
+				fs.FileMode(0754),
+				installerPath,
+				commands.DefaultWorkdir(),
+				commands.DefaultUser())); err != nil {
+			b.logger.Error("Failed uploading the service environment file",
+				"reason", err,
+				"service-env", serviceEnv)
+			return err
+		}
+
+		b.logger.Info("Executing service installer file")
+
+		// execute the installer, we leave it there...:
+		if err := remoteClient.RunCommand(commands.RunWithDefaults(installerPath)); err != nil {
+			b.logger.Error("BOOTSTRAP INCOMPLETE: Failed executing the local service installer",
+				"installer-path", installerPath,
+				"reason", err,
+				"service-env", serviceEnv)
+			return err
+		}
+
+		b.logger.Info("Service installer file executed")
+
+	} else {
+		b.logger.Warn("No service installer file configured")
+	}
+
+	for _, cmd := range b.postBuildCommands {
+		if err := remoteClient.RunCommand(cmd); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -121,16 +238,6 @@ func (b *defaultBuild) From() *commands.From {
 
 func (b *defaultBuild) Metadata() map[string]string {
 	return b.currentMetadata
-}
-
-func (b *defaultBuild) WithLogger(input hclog.Logger) Build {
-	b.logger = input
-	return b
-}
-
-func (b *defaultBuild) WithResolver(input resources.Resolver) Build {
-	b.resolver = input
-	return b
 }
 
 func (b *defaultBuild) WithFrom(input *commands.From) Build {
@@ -175,10 +282,38 @@ func (b *defaultBuild) WithInstruction(input interface{}) Build {
 		b.currentShell = tinput
 	case commands.User:
 		b.currentUser = tinput
+	case commands.Volume:
+		tinput.User = b.currentUser
+		tinput.Workdir = b.currentWorkdir
+		b.instructions = append(b.instructions, tinput)
 	case commands.Workdir:
 		b.currentWorkdir = tinput
 	}
 
+	return b
+}
+
+func (b *defaultBuild) WithLogger(input hclog.Logger) Build {
+	b.logger = input
+	return b
+}
+
+func (b *defaultBuild) WithPostBuildCommands(cmds ...commands.Run) Build {
+	b.postBuildCommands = append(b.postBuildCommands, cmds...)
+	return b
+}
+func (b *defaultBuild) WithPreBuildCommands(cmds ...commands.Run) Build {
+	b.preBuildCommands = append(b.preBuildCommands, cmds...)
+	return b
+}
+
+func (b *defaultBuild) WithResolver(input resources.Resolver) Build {
+	b.resolver = input
+	return b
+}
+
+func (b *defaultBuild) WithServiceInstaller(input string) Build {
+	b.serviceInstaller = input
 	return b
 }
 
@@ -201,15 +336,9 @@ func NewDefaultBuild() Build {
 	}
 }
 
-func defaultResourceAddResolve(res commands.Add) (*os.File, error) {
-	return defaultResourceResolve(res.Source)
-}
-
-func defaultResourceCopyResolve(res commands.Copy) (*os.File, error) {
-	return defaultResourceResolve(res.Source)
-}
-
-func defaultResourceResolve(source string) (*os.File, error) {
-
-	return nil, nil
+func mapShellString(input []string) []string {
+	for idx, item := range input {
+		input[idx] = strings.ReplaceAll(item, "\"", "\"\"")
+	}
+	return input
 }

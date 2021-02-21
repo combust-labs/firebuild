@@ -66,7 +66,8 @@ sudo bash
     --machine-rootfs-base=/firecracker/rootfs \
     --machine-ssh-user=alpine \
     --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
-    --init-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update'
+    --init-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
+    --tag=tests/consul:1.9.3
 ```
 
 ## git+http(s):// URL
@@ -83,8 +84,11 @@ It's possible to reference a `Dockerfile` residing in the git repository availab
     --machine-rootfs-base=/firecracker/rootfs \
     --machine-ssh-user=alpine \
     --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
-    --init-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
-    --log-as-json
+    --post-build-command='chmod -x /etc/init.d/sshd' \
+    --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
+    --log-as-json \
+    --tag=tests/consul:1.9.3 \
+    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
 ```
 
 The URL format is:
@@ -129,4 +133,12 @@ There are following limitations when loading the resources like that via URL:
 
 - if the `ADD` or `COPY` points to a directory, the command will fail because there is no unified way of loading directories via HTTP, the resolver will not even attempt this, it will most likely fail on the `HTTP GET` request
 - the file permissions will not be carried over because there is no method to infer file mode from a HTTP response
+
+## Unsupported Dockerfile features
+
+The build program does not support:
+
+- `ONBUILD` commands
+- `HEALTHCHECK` commands
+- `STOPSIGNAL` commands
 
