@@ -6,6 +6,7 @@ require (
 	github.com/containernetworking/cni v0.8.0
 	github.com/firecracker-microvm/firecracker-go-sdk v0.22.0
 	github.com/gofrs/uuid v4.0.0+incompatible
+	github.com/hashicorp/go-hclog v0.15.0
 	github.com/moby/buildkit v0.8.1
 	github.com/pkg/sftp v1.12.0
 	github.com/sirupsen/logrus v1.7.0

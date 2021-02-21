@@ -14,10 +14,12 @@ import (
 	"github.com/appministry/firebuild/buildcontext"
 	"github.com/appministry/firebuild/buildcontext/commands"
 	"github.com/appministry/firebuild/buildcontext/utils"
+	"github.com/appministry/firebuild/configs"
 	"github.com/appministry/firebuild/remote"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/gofrs/uuid"
+	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
 
 	"github.com/sirupsen/logrus"
@@ -72,6 +74,7 @@ type cniConfig struct {
 var (
 	commandConfig        = new(buildConfig)
 	commandCniConfig     = new(cniConfig)
+	logConfig            = new(configs.LogConfig)
 	rootFSCopyBufferSize = 4 * 1024 * 1024
 	stoppedGracefully    = stoppedOK(true)
 	stoppedForcefully    = stoppedOK(false)
@@ -105,6 +108,11 @@ func initFlags() {
 	Command.Flags().StringVar(&commandCniConfig.ConfDir, "cni-conf-dir", "/etc/cni/conf.d", "CNI configuration directory")
 	Command.Flags().StringVar(&commandCniConfig.CacheDir, "cni-cache-dir", "/var/lib/cni", "CNI cache directory")
 
+	Command.Flags().StringVar(&logConfig.LogLevel, "log-level", "debug", "Log level")
+	Command.Flags().BoolVar(&logConfig.LogAsJSON, "log-as-json", false, "Log as JSON")
+	Command.Flags().BoolVar(&logConfig.LogColor, "log-color", false, "Log in color")
+	Command.Flags().BoolVar(&logConfig.LogForceColor, "log-force-color", false, "Force colored log output")
+
 	Command.Flags().Int64Var(&commandConfig.ResourcesCPU, "resources-cpu", 1, "Number of CPU for the build VMM")
 	Command.Flags().Int64Var(&commandConfig.ResourcesMem, "resources-mem", 128, "Amount of memory for the VMM")
 }
@@ -116,28 +124,36 @@ func init() {
 
 func run(cobraCommand *cobra.Command, _ []string) {
 
+	cleanup := &defers{fs: []func(){}}
+	defer cleanup.exec()
+
+	rootLogger := configs.NewLogger("build", logConfig)
+
 	// The first thing to do is to resolve the Dockerfile:
 	buildContext, err := buildcontext.NewFromString(commandConfig.Dockerfile)
 	if err != nil {
-		fmt.Println(err)
+		rootLogger.Error("failed parsing Dockerfile", "reason", err)
 		os.Exit(1)
 	}
 
 	base := buildContext.From()
 	if base == nil {
-		fmt.Println("no base to build from")
+		rootLogger.Error("no base to build from")
 		os.Exit(1)
 	}
 	structuredBase := base.ToStructuredFrom()
 
 	tempDirectory, err := ioutil.TempDir("", "")
 	if err != nil {
-		fmt.Println(err)
+		rootLogger.Error("Failed creating temporary build directory", "reason", err)
 		os.Exit(1)
 	}
-	defer func() {
-		fmt.Println("Cleaning up temp build directory:", os.RemoveAll(tempDirectory))
-	}()
+
+	cleanup.add(func() {
+		rootLogger.Info("cleaning up temp build directory")
+		status := os.RemoveAll(tempDirectory)
+		rootLogger.Info("temp build directory removal status", "error", status)
+	})
 
 	// TODO: check that it exists and is regular file
 	sourceRootfs := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), "root.ext4")
@@ -149,18 +165,29 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		filepath.Base(commandConfig.BinaryFirecracker), vmmID)
 
 	if err := copyFile(sourceRootfs, buildRootfs, rootFSCopyBufferSize); err != nil {
-		fmt.Println(err)
+		rootLogger.Error("failed copying requested rootfs to temp build location",
+			"source", sourceRootfs,
+			"target", buildRootfs,
+			"reason", err)
+		cleanup.exec() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
 
-	fmt.Println("Building from", commandConfig.Dockerfile, "using rootfs", sourceRootfs, "copied to", buildRootfs)
-	fmt.Println("Jail directory", jailDirectory, "will be cleaned up automatically")
 	vethIfaceName := getRandomVethName()
-	fmt.Println("Going to use", vethIfaceName, "as veth interface name")
 
-	defer func() {
-		fmt.Println("Cleaning up jail directory:", os.RemoveAll(jailDirectory))
-	}()
+	vmmLogger := rootLogger.With("vmm-id", vmmID, "veth-name", vethIfaceName)
+
+	vmmLogger.Info("buildiing VMM",
+		"dockerfile", commandConfig.Dockerfile,
+		"source-rootfs", buildRootfs,
+		"origin-rootfs", sourceRootfs,
+		"jail", jailDirectory)
+
+	cleanup.add(func() {
+		vmmLogger.Info("cleaning up jail directory")
+		status := os.RemoveAll(jailDirectory)
+		vmmLogger.Info("jail directory removal status", "error", status)
+	})
 
 	var fifo io.WriteCloser // TODO: do it like firectl does it
 
@@ -215,20 +242,21 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	vmmCtx, vmmCancel := context.WithCancel(context.Background())
-	defer func() {
-		fmt.Println("Calling cancel on the runVMM context")
+	cleanup.add(func() {
 		vmmCancel()
-	}()
+	})
+
 	machine, runErr := runVMM(vmmCtx, fcConfig)
 	if runErr != nil {
-		fmt.Println("Machine did not start, reason:", runErr)
+		vmmLogger.Error("Firecracker VMM did not start, build failed", "reason", runErr)
+		return
 	}
 
 	ifaceStaticConfig := fcConfig.NetworkInterfaces[0].StaticConfiguration
-	fmt.Println("Machine is started. IP net address is:",
-		ifaceStaticConfig.IPConfiguration.IPAddr.String(),
-		"IP address is:",
-		ifaceStaticConfig.IPConfiguration.IPAddr.IP.String())
+
+	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IPAddr.IP.String())
+
+	vmmLogger.Info("VMM running", "ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String())
 
 	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
 		SSKKeyFile:          commandConfig.MachineSSHKey,
@@ -236,52 +264,58 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		IP:                  ifaceStaticConfig.IPConfiguration.IPAddr.IP,
 		Port:                commandConfig.MachineSSHPort,
 		DisableAgentForward: commandConfig.MachineSSHDisableAgentForward,
-	})
+	}, vmmLogger.Named("remote-client"))
 
 	if remoteErr != nil {
-		stopVMM(vmmCtx, machine, vethIfaceName, nil)
-		fmt.Println("Could not connect to remote:", remoteErr)
+		stopVMM(vmmCtx, machine, vethIfaceName, nil, vmmLogger)
+		vmmLogger.Error("Failed connecting to remote", "reason", remoteErr)
 		return
 	}
 
-	fmt.Println("Connected via SSH connect to remote:", remoteClient)
+	vmmLogger.Info("Connected via SSH")
 
+	// TODO: replace with VMM based egress testing
 	time.Sleep(time.Second * 10)
 
 	initCommands := []commands.Run{
 		commands.RunWithDefaults("rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update"),
 	}
 
-	if err := buildContext.Build(remoteClient, initCommands...); err != nil {
-		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient)
-		fmt.Println("Failed bootstrapping remote:", remoteErr)
+	if buildErr := buildContext.WithLogger(vmmLogger.Named("builder")).Build(remoteClient, initCommands...); err != nil {
+		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+		vmmLogger.Error("Failed boostrapping remote via SSH", "reason", buildErr)
 		return
 	}
 
 	go func() {
-		if stopVMM(vmmCtx, machine, vethIfaceName, remoteClient) == stoppedForcefully {
-			fmt.Println("WARNING: Machine was not stopped gracefully, see previous errors. It's possible that the file system may not be complete. Retry or proceed with caution.")
+		if stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger) == stoppedForcefully {
+			vmmLogger.Warn("Machine was not stopped gracefully, see previous errors. It's possible that the file system may not be complete. Retry or proceed with caution.")
 		}
 	}()
 
+	vmmLogger.Info("Waiting for machine to stop...")
+
 	machine.Wait(context.Background())
 
-	fmt.Println("Persisting file system...")
+	vmmLogger.Info("Machine to stopped. Persisting the file system...")
 
 	// TODO: handle moving the boostrapped file system here
 
 }
 
-func stopVMM(ctx context.Context, machine *firecracker.Machine, vethIfaceName string, remoteClient remote.ConnectedClient) stoppedOK {
+func stopVMM(ctx context.Context, machine *firecracker.Machine, vethIfaceName string, remoteClient remote.ConnectedClient, logger hclog.Logger) stoppedOK {
 
 	if remoteClient != nil {
-		fmt.Println("Closing remote client...")
-		fmt.Println("Remote client closed:", remoteClient.Close())
+		logger.Info("Closing remote client...")
+		status := remoteClient.Close()
+		logger.Info("Remote client closed", "error", status)
 	}
 
 	shutdownCtx, cancelFunc := context.WithTimeout(ctx, time.Second*time.Duration(commandConfig.ShutdownGracefulTimeoutSeconds))
 	defer cancelFunc()
-	fmt.Println("Stopping VMM gracefully...")
+
+	logger.Info("Attempting VMM graceful shutdown...")
+
 	chanStopped := make(chan error, 1)
 	go func() {
 		// Ask the machine to shut down so the file system gets flushed
@@ -294,14 +328,18 @@ func stopVMM(ctx context.Context, machine *firecracker.Machine, vethIfaceName st
 	select {
 	case stopErr := <-chanStopped:
 		if stopErr != nil {
-			fmt.Println("VMM stopped with error:", stopErr, "stopping forcefully:", machine.StopVMM())
+			logger.Warn("VMM stopped with error but within timeout", "reason", stopErr)
+			logger.Warn("VMM stopped forcefully", "error", machine.StopVMM())
 		} else {
-			fmt.Println("VMM stopped gracefully")
+			logger.Warn("VMM stopped gracefully")
 			stoppedState = stoppedGracefully
 		}
 	case <-shutdownCtx.Done():
-		fmt.Println("VMM failed to stop gracefully within the timeout, stopping forcefully:", machine.StopVMM())
+		logger.Warn("VMM failed to stop gracefully: timeout reached")
+		logger.Warn("VMM stopped forcefully", "error", machine.StopVMM())
 	}
+
+	logger.Info("Cleaning up CNI network...")
 
 	cniCleanupErr := cleanupCNINetwork(commandCniConfig,
 		commandConfig.NetNS,
@@ -309,15 +347,15 @@ func stopVMM(ctx context.Context, machine *firecracker.Machine, vethIfaceName st
 		commandConfig.MachineCNINetworkName,
 		vethIfaceName)
 
-	fmt.Println("Cleaning up CNI network interface:", cniCleanupErr)
+	logger.Info("CNI network cleanup status", "error", cniCleanupErr)
 
 	return stoppedState
 }
 
 func runVMM(ctx context.Context, fcConfig firecracker.Config) (*firecracker.Machine, error) {
-	logger := logrus.New()
+	vmmLogger := logrus.New()
 	machineOpts := []firecracker.Opt{
-		firecracker.WithLogger(logrus.NewEntry(logger)),
+		firecracker.WithLogger(logrus.NewEntry(vmmLogger)),
 	}
 	m, err := firecracker.NewMachine(ctx, fcConfig, machineOpts...)
 	if err != nil {

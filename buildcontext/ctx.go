@@ -1,12 +1,12 @@
 package buildcontext
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/appministry/firebuild/buildcontext/commands"
 	"github.com/appministry/firebuild/buildcontext/resources"
 	"github.com/appministry/firebuild/remote"
+	"github.com/hashicorp/go-hclog"
 )
 
 // Build represents the build operation.
@@ -15,6 +15,7 @@ type Build interface {
 	ExposedPorts() []string
 	From() *commands.From
 	Metadata() map[string]string
+	WithLogger(hclog.Logger) Build
 	WithResolver(resources.Resolver) Build
 	WithFrom(*commands.From) Build
 	WithInstruction(interface{}) Build
@@ -32,13 +33,15 @@ type defaultBuild struct {
 	exposedPorts      []string
 	from              *commands.From
 	instructions      []interface{}
+	logger            hclog.Logger
 	resolver          resources.Resolver
 
 	resolvedResources map[string]resources.ResolvedResource
 }
 
 func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands ...commands.Run) error {
-	fmt.Println("Building rootfs from", b.from.BaseImage)
+
+	buildLogger := b.logger.With("from", b.from.BaseImage)
 
 	// validate resources first:
 	for _, command := range b.instructions {
@@ -67,36 +70,39 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands .
 		switch tcommand := command.(type) {
 		case commands.Add:
 			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
-				fmt.Println("Putting ADD resource", tcommand.Source)
+				buildLogger.Info("Putting ADD resource", "source", tcommand.Source)
 				if err := remoteClient.PutResource(resource); err != nil {
-					fmt.Println("PutResource for ADD", tcommand.Source, "failed with error:", err)
+					buildLogger.Error("PutResource ADD resource failed", "source", tcommand.Source, "reason", err)
 					return err
 				}
 			} else {
-				return fmt.Errorf("resource '%s' of ADD type required but not resolved", tcommand.Source)
+				buildLogger.Error("resource ADD type required but not resolved", "source", tcommand.Source)
 			}
 		case commands.Copy:
-			fmt.Println("Putting COPY resource", tcommand.Source)
+			buildLogger.Info("Putting COPY resource", "source", tcommand.Source)
 			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
 				if err := remoteClient.PutResource(resource); err != nil {
-					fmt.Println("PutResource for COPY", tcommand.Source, "failed with error:", err)
+					buildLogger.Error("PutResource COPY resource failed", "source", tcommand.Source, "reason", err)
 					return err
 				}
 			} else {
-				return fmt.Errorf("resource '%s' of COPY type required but not resolved", tcommand.Source)
+				buildLogger.Error("resource COPY type required but not resolved", "source", tcommand.Source)
 			}
 		case commands.Run:
 			if err := remoteClient.RunCommand(tcommand); err != nil {
+				buildLogger.Error("RunCommand failed", "reason", err)
 				return err
 			}
 		}
 	}
-	fmt.Println("Metadata is", b.Metadata())
-	fmt.Println("Exposed ports", b.ExposedPorts())
-	fmt.Println("OS Service should execute:")
-	fmt.Println(" =====> Command: ", b.currentEntrypoint.Values)
-	fmt.Println(" =====> Arguments: ", b.currentCmd)
-	fmt.Println(fmt.Sprintf(" =====> As user %q, Using shell %q, in directory %q", b.currentEntrypoint.User.Value, b.currentEntrypoint.Shell.Commands, b.currentEntrypoint.Workdir.Value))
+	/*
+		fmt.Println("Metadata is", b.Metadata())
+		fmt.Println("Exposed ports", b.ExposedPorts())
+		fmt.Println("OS Service should execute:")
+		fmt.Println(" =====> Command: ", b.currentEntrypoint.Values)
+		fmt.Println(" =====> Arguments: ", b.currentCmd)
+		fmt.Println(fmt.Sprintf(" =====> As user %q, Using shell %q, in directory %q", b.currentEntrypoint.User.Value, b.currentEntrypoint.Shell.Commands, b.currentEntrypoint.Workdir.Value))
+	*/
 	return nil
 }
 
@@ -113,6 +119,11 @@ func (b *defaultBuild) From() *commands.From {
 
 func (b *defaultBuild) Metadata() map[string]string {
 	return b.currentMetadata
+}
+
+func (b *defaultBuild) WithLogger(input hclog.Logger) Build {
+	b.logger = input
+	return b
 }
 
 func (b *defaultBuild) WithResolver(input resources.Resolver) Build {
@@ -182,6 +193,7 @@ func NewDefaultBuild() Build {
 		currentWorkdir:    commands.Workdir{Value: "/"},
 		exposedPorts:      []string{},
 		instructions:      []interface{}{},
+		logger:            hclog.Default(),
 		resolver:          resources.NewDefaultResolver(),
 		resolvedResources: map[string]resources.ResolvedResource{},
 	}

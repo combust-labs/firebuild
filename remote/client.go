@@ -15,6 +15,7 @@ import (
 	"github.com/appministry/firebuild/buildcontext/commands"
 	"github.com/appministry/firebuild/buildcontext/resources"
 	"github.com/appministry/firebuild/buildcontext/utils"
+	"github.com/hashicorp/go-hclog"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -41,7 +42,7 @@ type ConnectConfig struct {
 // Connect connects to the SSH location location and returns a connected client.
 // The connected client contains an SSH and SFTP clients.
 // Use SSH client to run remote commands and SFTP client to upload files for the ADD / COPY commands.
-func Connect(ctx context.Context, cfg ConnectConfig) (ConnectedClient, error) {
+func Connect(ctx context.Context, cfg ConnectConfig, logger hclog.Logger) (ConnectedClient, error) {
 
 	hostPort := fmt.Sprintf("%s:%d", cfg.IP.String(), cfg.Port)
 	authMethods := []ssh.AuthMethod{}
@@ -111,7 +112,7 @@ func Connect(ctx context.Context, cfg ConnectConfig) (ConnectedClient, error) {
 			// of can't authenticate
 			sshClient, err := ssh.Dial("tcp", hostPort, &config)
 			if err != nil {
-				fmt.Println("not connected yet:", fmt.Errorf("unable to connect to [%s]: %+v", hostPort, err))
+				logger.Debug("SSH: not connected yet", "host-port", hostPort, "reason", err)
 				<-time.After(time.Second)
 				continue
 			}
@@ -125,7 +126,7 @@ func Connect(ctx context.Context, cfg ConnectConfig) (ConnectedClient, error) {
 			}()))
 
 			if err != nil {
-				fmt.Println("failed to connect:", fmt.Errorf("unable to start sftp subsystem: %+v", err))
+				logger.Debug("SSH: failed to connect, unable to start the SFTP subsystem", "host-port", hostPort, "reason", err)
 				sshClient.Close()
 				chanError <- fmt.Errorf("unable to start sftp subsystem: %+v", err)
 				return // exit goroutine
@@ -133,6 +134,7 @@ func Connect(ctx context.Context, cfg ConnectConfig) (ConnectedClient, error) {
 
 			chanConnectedClient <- &defaultConnectedClient{
 				connectedUser: cfg.SSHUsername,
+				logger:        logger.Named("connected-remote-client"),
 				sshClient:     sshClient,
 				sftpClient:    sftpClient,
 			}
@@ -163,6 +165,7 @@ type ConnectedClient interface {
 
 type defaultConnectedClient struct {
 	connectedUser string
+	logger        hclog.Logger
 	sshClient     *ssh.Client
 	sftpClient    *sftp.Client
 }
@@ -203,7 +206,9 @@ func (dcc *defaultConnectedClient) RunCommand(command commands.Run) error {
 		command.Workdir.Value,
 		strings.Join(command.Shell.Commands, " "),
 		strings.ReplaceAll(command.Command, "'", "''"))
-	fmt.Println("Remote client running command: =====> ", remoteCommand)
+
+	dcc.logger.Debug("Running remote command", "command", remoteCommand)
+
 	return sshSession.Run(remoteCommand)
 }
 
@@ -241,15 +246,18 @@ func (dcc *defaultConnectedClient) PutResource(resource resources.ResolvedResour
 		}
 
 		f.Close()
-		fmt.Println(fmt.Sprintf("Resource '%s' uploaded to temporary destination '%s'.", resource.TargetPath(), tempDestination))
+
+		dcc.logger.Debug("Resource uploaded to temporary destination", "resource", resource.TargetPath(), "temp-destination", tempDestination)
 
 		// 3. chmod it:
 		// can't chmod it using the SFTP client because it may not be the right user...
 		modeStrRepr := strconv.FormatUint(uint64(resource.TargetMode()), 8)
 		runErrChmod := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chmod 0%s %s", modeStrRepr, tempDestination)))
 		if runErrChmod != nil {
-			// TODO: log warning - chown failed
-			fmt.Println("Chmod failed:", runErrChmod)
+			dcc.logger.Warn("WARNING: chmod failed",
+				"resource", resource.TargetPath(),
+				"temp-destination", tempDestination,
+				"reason", runErrChmod)
 		}
 
 		// 4. chown it
@@ -257,8 +265,10 @@ func (dcc *defaultConnectedClient) PutResource(resource resources.ResolvedResour
 			// can't chown using the SFTP client because it may not be the right user...
 			runErrChown := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chown %s %s", resource.TargetUser().Value, tempDestination)))
 			if runErrChown != nil {
-				// TODO: log warning - chown failed
-				fmt.Println("Chown failed:", runErrChown)
+				dcc.logger.Warn("WARNING: chown failed",
+					"resource", resource.TargetPath(),
+					"temp-destination", tempDestination,
+					"reason", runErrChown)
 			}
 		}
 
@@ -276,7 +286,10 @@ func (dcc *defaultConnectedClient) PutResource(resource resources.ResolvedResour
 			// TODO: log warning
 		}
 
-		fmt.Println(fmt.Sprintf("Resource '%s' moved to final directory location '%s'.", resource.TargetPath(), destination))
+		dcc.logger.Debug("Resource moved to final destination",
+			"resource", resource.TargetPath(),
+			"temp-destination", tempDestination,
+			"final-destination", destination)
 
 		return nil
 	}
