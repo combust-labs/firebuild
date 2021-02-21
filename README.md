@@ -66,3 +66,17 @@ sudo /usr/local/go/bin/go run ./main.go build \
     --machine-ssh-user=alpine \
     --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8
 ```
+
+## Caveats when building from the URL
+
+The `build` command will resolve the resources refernced in `ADD` and `COPY` commands even when loading the `Dockerfile` via the URL. The context root in this case will be established by removing the file name from the URL. An example:
+
+- consider the URL `https://raw.githubusercontent.com/hashicorp/docker-consul/master/0.X/Dockerfile`
+- the `Dockerfile` name will be removed from the URL and the context is `https://raw.githubusercontent.com/hashicorp/docker-consul/master/0.X`
+- assuming that the `Dockerfile` contains `ADD ./docker-entrypoint.sh ...`, the resolver will try loading `https://raw.githubusercontent.com/hashicorp/docker-consul/master/0.X/docker-entrypoint.sh`
+
+There are following limitations when loading the resources like that via URL:
+
+- if the `ADD` or `COPY` points to a directory, the command will fail because there is no unified way of loading directories via HTTP, the resolver will not even attempt this, it will most likely fail on the `HTTP GET` request
+- the file permissions will not be carried over because there is no method to infer file mode from a HTTP response
+

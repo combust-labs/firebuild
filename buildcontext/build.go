@@ -30,7 +30,7 @@ func NewFromString(input string) (Build, error) {
 		if err != nil && err != io.EOF {
 			return nil, err
 		}
-		return NewFromBytes(bytes)
+		return NewFromBytesWithOriginalSource(bytes, input)
 	}
 
 	statResult, statErr := os.Stat(input)
@@ -54,7 +54,7 @@ func NewFromString(input string) (Build, error) {
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
-	return NewFromBytes(bytes)
+	return NewFromBytesWithOriginalSource(bytes, input)
 
 }
 
@@ -65,11 +65,22 @@ func NewFromBytes(input []byte) (Build, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewFromParserResult(parserResult)
+	return NewFromParserResult(parserResult, "")
+}
+
+// NewFromBytesWithOriginalSource creates a new build context from bytes and passes
+// the original source to the build context.
+// Use this method to automatically resolve the ADD / COPY dependencies.
+func NewFromBytesWithOriginalSource(input []byte, originalSource string) (Build, error) {
+	parserResult, err := parser.Parse(bytes.NewReader(input))
+	if err != nil {
+		return nil, err
+	}
+	return NewFromParserResult(parserResult, originalSource)
 }
 
 // NewFromParserResult creates a new build context from the Dockerfile parser result.
-func NewFromParserResult(parserResult *parser.Result) (Build, error) {
+func NewFromParserResult(parserResult *parser.Result, originalSource string) (Build, error) {
 	buildContext := NewDefaultBuild()
 	env := newBuildEnv()
 	for _, child := range parserResult.AST.Children {
@@ -88,8 +99,9 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 				return nil, fmt.Errorf("the ADD at %d must have exactly 2 elements", child.StartLine)
 			}
 			buildContext.WithInstruction(commands.Add{
-				Source: extracted[0],
-				Target: extracted[1],
+				OriginalSource: originalSource,
+				Source:         extracted[0],
+				Target:         extracted[1],
 			})
 		case "arg":
 			extracted := []string{}
@@ -137,8 +149,9 @@ func NewFromParserResult(parserResult *parser.Result) (Build, error) {
 				return nil, fmt.Errorf("the cmd at %d must have exactly 2 elements", child.StartLine)
 			}
 			buildContext.WithInstruction(commands.Copy{
-				Source: extracted[0],
-				Target: extracted[1],
+				OriginalSource: originalSource,
+				Source:         extracted[0],
+				Target:         extracted[1],
 			})
 		case "entrypoint":
 			entrypoint := commands.Entrypoint{Values: []string{}}

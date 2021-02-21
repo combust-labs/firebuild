@@ -2,8 +2,10 @@ package buildcontext
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/appministry/firebuild/buildcontext/commands"
+	"github.com/appministry/firebuild/buildcontext/resources"
 	"github.com/appministry/firebuild/remote"
 )
 
@@ -13,6 +15,7 @@ type Build interface {
 	ExposedPorts() []string
 	From() *commands.From
 	Metadata() map[string]string
+	WithResolver(resources.Resolver) Build
 	WithFrom(*commands.From) Build
 	WithInstruction(interface{}) Build
 }
@@ -29,10 +32,32 @@ type defaultBuild struct {
 	exposedPorts      []string
 	from              *commands.From
 	instructions      []interface{}
+	resolver          resources.Resolver
+
+	resolvedResources map[string]resources.ResolvedResource
 }
 
 func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands ...commands.Run) error {
 	fmt.Println("Building rootfs from", b.from.BaseImage)
+
+	// validate resources first:
+	for _, command := range b.instructions {
+		switch tcommand := command.(type) {
+		case commands.Add:
+			resolvedResource, err := b.resolver.ResolveAdd(tcommand)
+			if err != nil {
+				return err
+			}
+			b.resolvedResources[tcommand.Source] = resolvedResource
+		case commands.Copy:
+			resolvedResource, err := b.resolver.ResolveCopy(tcommand)
+			if err != nil {
+				return err
+			}
+			b.resolvedResources[tcommand.Source] = resolvedResource
+		}
+	}
+
 	for _, initCommand := range initCommands {
 		if err := remoteClient.RunCommand(initCommand); err != nil {
 			return err
@@ -41,9 +66,25 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient, initCommands .
 	for _, command := range b.instructions {
 		switch tcommand := command.(type) {
 		case commands.Add:
-			fmt.Println(fmt.Sprintf(" =====> Add %q as %q", tcommand.Source, tcommand.Target))
+			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
+				fmt.Println("Putting ADD resource", tcommand.Source)
+				if err := remoteClient.PutResource(resource); err != nil {
+					fmt.Println("PutResource for ADD", tcommand.Source, "failed with error:", err)
+					return err
+				}
+			} else {
+				return fmt.Errorf("resource '%s' of ADD type required but not resolved", tcommand.Source)
+			}
 		case commands.Copy:
-			fmt.Println(fmt.Sprintf(" =====> Copy %q as %q", tcommand.Source, tcommand.Target))
+			fmt.Println("Putting COPY resource", tcommand.Source)
+			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
+				if err := remoteClient.PutResource(resource); err != nil {
+					fmt.Println("PutResource for COPY", tcommand.Source, "failed with error:", err)
+					return err
+				}
+			} else {
+				return fmt.Errorf("resource '%s' of COPY type required but not resolved", tcommand.Source)
+			}
 		case commands.Run:
 			if err := remoteClient.RunCommand(tcommand); err != nil {
 				return err
@@ -74,6 +115,11 @@ func (b *defaultBuild) Metadata() map[string]string {
 	return b.currentMetadata
 }
 
+func (b *defaultBuild) WithResolver(input resources.Resolver) Build {
+	b.resolver = input
+	return b
+}
+
 func (b *defaultBuild) WithFrom(input *commands.From) Build {
 	b.from = input
 	return b
@@ -82,12 +128,16 @@ func (b *defaultBuild) WithFrom(input *commands.From) Build {
 func (b *defaultBuild) WithInstruction(input interface{}) Build {
 	switch tinput := input.(type) {
 	case commands.Add:
+		tinput.User = b.currentUser
+		tinput.Workdir = b.currentWorkdir
 		b.instructions = append(b.instructions, tinput)
 	case commands.Arg:
 		b.currentArgs[tinput.Name] = tinput.Value
 	case commands.Cmd:
 		b.currentCmd = tinput
 	case commands.Copy:
+		tinput.User = b.currentUser
+		tinput.Workdir = b.currentWorkdir
 		b.instructions = append(b.instructions, tinput)
 	case commands.Entrypoint:
 		tinput.Env = b.currentEnv
@@ -132,5 +182,20 @@ func NewDefaultBuild() Build {
 		currentWorkdir:    commands.Workdir{Value: "/"},
 		exposedPorts:      []string{},
 		instructions:      []interface{}{},
+		resolver:          resources.NewDefaultResolver(),
+		resolvedResources: map[string]resources.ResolvedResource{},
 	}
+}
+
+func defaultResourceAddResolve(res commands.Add) (*os.File, error) {
+	return defaultResourceResolve(res.Source)
+}
+
+func defaultResourceCopyResolve(res commands.Copy) (*os.File, error) {
+	return defaultResourceResolve(res.Source)
+}
+
+func defaultResourceResolve(source string) (*os.File, error) {
+
+	return nil, nil
 }

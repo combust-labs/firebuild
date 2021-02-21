@@ -7,10 +7,14 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/appministry/firebuild/buildcontext/commands"
+	"github.com/appministry/firebuild/buildcontext/resources"
+	"github.com/appministry/firebuild/buildcontext/utils"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -128,8 +132,9 @@ func Connect(ctx context.Context, cfg ConnectConfig) (ConnectedClient, error) {
 			}
 
 			chanConnectedClient <- &defaultConnectedClient{
-				sshClient:  sshClient,
-				sftpClient: sftpClient,
+				connectedUser: cfg.SSHUsername,
+				sshClient:     sshClient,
+				sftpClient:    sftpClient,
 			}
 			return
 
@@ -153,13 +158,13 @@ func Connect(ctx context.Context, cfg ConnectConfig) (ConnectedClient, error) {
 type ConnectedClient interface {
 	Close() error
 	RunCommand(commands.Run) error
-	PutFile() error
-	PutDirectory() error
+	PutResource(resources.ResolvedResource) error
 }
 
 type defaultConnectedClient struct {
-	sshClient  *ssh.Client
-	sftpClient *sftp.Client
+	connectedUser string
+	sshClient     *ssh.Client
+	sftpClient    *sftp.Client
 }
 
 func (dcc *defaultConnectedClient) Close() error {
@@ -202,10 +207,78 @@ func (dcc *defaultConnectedClient) RunCommand(command commands.Run) error {
 	return sshSession.Run(remoteCommand)
 }
 
-func (dcc *defaultConnectedClient) PutFile() error {
-	return nil
-}
+func (dcc *defaultConnectedClient) PutResource(resource resources.ResolvedResource) error {
+	if !resource.IsDir() {
 
-func (dcc *defaultConnectedClient) PutDirectory() error {
-	return nil
+		bootstrapDir := filepath.Join("/tmp", utils.RandStringBytes(32))
+		randomFileName := utils.RandStringBytes(32)
+		tempDestination := filepath.Join(bootstrapDir, randomFileName)
+
+		// 1. Create a bootstrap directory:
+
+		runErrBootstrapDir := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && chown -R %s '%s'",
+			bootstrapDir,
+			dcc.connectedUser,
+			bootstrapDir)))
+		if runErrBootstrapDir != nil {
+			return runErrBootstrapDir
+		}
+
+		// 2. Put the file at the temporary destination:
+
+		f, err := dcc.sftpClient.Create(tempDestination)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		requiredBytes := len(resource.Bytes())
+		written, err := f.Write(resource.Bytes())
+		if err != nil {
+			return err
+		}
+		if written != len(resource.Bytes()) {
+			return fmt.Errorf("write incomplete for '%s': written bytes: %d, file had: %d", resource.TargetPath(), written, requiredBytes)
+		}
+
+		f.Close()
+		fmt.Println(fmt.Sprintf("Resource '%s' uploaded to temporary destination '%s'.", resource.TargetPath(), tempDestination))
+
+		// 3. chmod it:
+		// can't chmod it using the SFTP client because it may not be the right user...
+		modeStrRepr := strconv.FormatUint(uint64(resource.TargetMode()), 8)
+		runErrChmod := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chmod 0%s %s", modeStrRepr, tempDestination)))
+		if runErrChmod != nil {
+			// TODO: log warning - chown failed
+			fmt.Println("Chmod failed:", runErrChmod)
+		}
+
+		// 4. chown it
+		if resource.TargetUser().Value != "" {
+			// can't chown using the SFTP client because it may not be the right user...
+			runErrChown := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chown %s %s", resource.TargetUser().Value, tempDestination)))
+			if runErrChown != nil {
+				// TODO: log warning - chown failed
+				fmt.Println("Chown failed:", runErrChown)
+			}
+		}
+
+		// 5. Move it to the final destination:
+		destination := filepath.Dir(filepath.Join(resource.TargetWorkdir().Value, resource.TargetPath()))
+		destinationDirectory := filepath.Dir(destination)
+		runErrMove := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && mv '%s' '%s'", destinationDirectory, tempDestination, destination)))
+		if runErrMove != nil {
+			return runErrMove
+		}
+
+		// 6. Clean up
+		runErrCleanup := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("rm -r '%s'", bootstrapDir)))
+		if runErrCleanup != nil {
+			// TODO: log warning
+		}
+
+		fmt.Println(fmt.Sprintf("Resource '%s' moved to final directory location '%s'.", resource.TargetPath(), destination))
+
+		return nil
+	}
+	return fmt.Errorf("not implemented: directory put")
 }

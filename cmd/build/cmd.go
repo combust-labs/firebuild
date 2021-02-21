@@ -13,6 +13,7 @@ import (
 
 	"github.com/appministry/firebuild/buildcontext"
 	"github.com/appministry/firebuild/buildcontext/commands"
+	"github.com/appministry/firebuild/buildcontext/utils"
 	"github.com/appministry/firebuild/remote"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
@@ -248,11 +249,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	time.Sleep(time.Second * 10)
 
 	initCommands := []commands.Run{
-		{
-			Shell:   commands.Shell{Commands: []string{"/bin/sh", "-c"}},
-			Command: "rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update",
-			Workdir: commands.Workdir{Value: "/"},
-		},
+		commands.RunWithDefaults("rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update"),
 	}
 
 	if err := buildContext.Build(remoteClient, initCommands...); err != nil {
@@ -375,15 +372,5 @@ func cleanupCNINetwork(cniConfig *cniConfig, netNs, vmmID, networkName, ifname s
 }
 
 func getRandomVethName() string {
-	return fmt.Sprintf("veth%s", randStringBytes(11))
-}
-
-const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-func randStringBytes(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letterBytes[rand.Intn(len(letterBytes))]
-	}
-	return string(b)
+	return fmt.Sprintf("veth%s", utils.RandStringBytes(11))
 }

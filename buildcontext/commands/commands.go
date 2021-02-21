@@ -1,11 +1,16 @@
 package commands
 
-import "strings"
+import (
+	"strings"
+)
 
 // Add represents the ADD instruction.
 type Add struct {
-	Source string
-	Target string
+	OriginalSource string
+	Source         string
+	Target         string
+	Workdir        Workdir
+	User           User
 }
 
 // Arg represents the ARG instruction.
@@ -21,8 +26,11 @@ type Cmd struct {
 
 // Copy represents the COPY instruction.
 type Copy struct {
-	Source string
-	Target string
+	OriginalSource string
+	Source         string
+	Target         string
+	Workdir        Workdir
+	User           User
 }
 
 // Entrypoint represents the ENTRYPOINT instruction.
@@ -115,4 +123,31 @@ type User struct {
 // Workdir represents the WORKDIR instruction.
 type Workdir struct {
 	Value string
+}
+
+// DefaultShell returns the default shell.
+func DefaultShell() Shell {
+	return Shell{Commands: []string{"/bin/sh", "-c"}}
+}
+
+// DefaultUser returns the default user.
+func DefaultUser() User {
+	return User{Value: "0:0"}
+}
+
+// DefaultWorkdir returns the default workdir.
+func DefaultWorkdir() Workdir {
+	return Workdir{Value: "/"}
+}
+
+// RunWithDefaults returns a Run for a given command with defaults.
+func RunWithDefaults(command string) Run {
+	return Run{
+		Args:    map[string]string{},
+		Env:     map[string]string{},
+		Command: command,
+		Shell:   DefaultShell(),
+		User:    DefaultUser(),
+		Workdir: DefaultWorkdir(),
+	}
 }
