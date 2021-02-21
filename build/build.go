@@ -1,4 +1,4 @@
-package buildcontext
+package build
 
 import (
 	"fmt"
@@ -9,8 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/appministry/firebuild/buildcontext/commands"
-	"github.com/appministry/firebuild/buildcontext/resources"
+	"github.com/appministry/firebuild/build/commands"
+	"github.com/appministry/firebuild/build/env"
+	"github.com/appministry/firebuild/build/resources"
 	"github.com/appministry/firebuild/remote"
 	"github.com/hashicorp/go-hclog"
 )
@@ -19,12 +20,12 @@ const etcDirectory = "/etc/firebuild"
 
 // Build represents the build operation.
 type Build interface {
+	AddInstructions(...interface{}) error
 	Build(remote.ConnectedClient) error
 	ExposedPorts() []string
-	From() *commands.From
+	From() commands.From
 	Metadata() map[string]string
-	WithFrom(*commands.From) Build
-	WithInstruction(interface{}) Build
+	WithBuildArgs(map[string]string) Build
 	WithLogger(hclog.Logger) Build
 	WithPostBuildCommands(...commands.Run) Build
 	WithPreBuildCommands(...commands.Run) Build
@@ -33,6 +34,8 @@ type Build interface {
 }
 
 type defaultBuild struct {
+	buildArgs         map[string]string
+	buildEnv          env.BuildEnv
 	currentArgs       map[string]string
 	currentCmd        commands.Cmd
 	currentEntrypoint commands.Entrypoint
@@ -42,8 +45,9 @@ type defaultBuild struct {
 	currentUser       commands.User
 	currentWorkdir    commands.Workdir
 	exposedPorts      []string
-	from              *commands.From
+	from              commands.From
 	instructions      []interface{}
+	isDependencyBuild bool
 	logger            hclog.Logger
 	resolver          resources.Resolver
 	serviceInstaller  string
@@ -51,7 +55,7 @@ type defaultBuild struct {
 	postBuildCommands []commands.Run
 	preBuildCommands  []commands.Run
 
-	resolvedResources map[string]resources.ResolvedResource
+	resolvedResources map[string][]resources.ResolvedResource
 }
 
 func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
@@ -89,9 +93,11 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 		case commands.Add:
 			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
 				b.logger.Info("Putting ADD resource", "source", tcommand.Source)
-				if err := remoteClient.PutResource(resource); err != nil {
-					b.logger.Error("PutResource ADD resource failed", "source", tcommand.Source, "reason", err)
-					return err
+				for _, resourceItem := range resource {
+					if err := remoteClient.PutResource(resourceItem); err != nil {
+						b.logger.Error("PutResource ADD resource failed", "source", tcommand.Source, "reason", err)
+						return err
+					}
 				}
 			} else {
 				b.logger.Error("resource ADD type required but not resolved", "source", tcommand.Source)
@@ -99,9 +105,11 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 		case commands.Copy:
 			b.logger.Info("Putting COPY resource", "source", tcommand.Source)
 			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
-				if err := remoteClient.PutResource(resource); err != nil {
-					b.logger.Error("PutResource COPY resource failed", "source", tcommand.Source, "reason", err)
-					return err
+				for _, resourceItem := range resource {
+					if err := remoteClient.PutResource(resourceItem); err != nil {
+						b.logger.Error("PutResource COPY resource failed", "source", tcommand.Source, "reason", err)
+						return err
+					}
 				}
 			} else {
 				b.logger.Error("resource COPY type required but not resolved", "source", tcommand.Source)
@@ -229,68 +237,85 @@ func (b *defaultBuild) ExposedPorts() []string {
 	return b.exposedPorts
 }
 
-func (b *defaultBuild) From() *commands.From {
-	if b.from == nil {
-		return nil
-	}
-	return &commands.From{BaseImage: b.from.BaseImage}
+func (b *defaultBuild) From() commands.From {
+	return b.from
 }
 
 func (b *defaultBuild) Metadata() map[string]string {
 	return b.currentMetadata
 }
 
-func (b *defaultBuild) WithFrom(input *commands.From) Build {
-	b.from = input
+func (b *defaultBuild) WithBuildArgs(input map[string]string) Build {
+	b.buildArgs = input
 	return b
 }
 
-func (b *defaultBuild) WithInstruction(input interface{}) Build {
-	switch tinput := input.(type) {
-	case commands.Add:
-		tinput.User = b.currentUser
-		tinput.Workdir = b.currentWorkdir
-		b.instructions = append(b.instructions, tinput)
-	case commands.Arg:
-		b.currentArgs[tinput.Name] = tinput.Value
-	case commands.Cmd:
-		b.currentCmd = tinput
-	case commands.Copy:
-		tinput.User = b.currentUser
-		tinput.Workdir = b.currentWorkdir
-		b.instructions = append(b.instructions, tinput)
-	case commands.Entrypoint:
-		tinput.Env = b.currentEnv
-		tinput.Shell = b.currentShell
-		tinput.User = b.currentUser
-		tinput.Workdir = b.currentWorkdir
-		b.currentEntrypoint = tinput
-	case commands.Env:
-		b.currentEnv[tinput.Name] = tinput.Value
-	case commands.Expose:
-		b.exposedPorts = append(b.exposedPorts, tinput.RawValue)
-	case commands.Label:
-		b.currentMetadata[tinput.Key] = tinput.Value
-	case commands.Run:
-		tinput.Args = b.currentArgs
-		tinput.Env = b.currentEnv
-		tinput.Shell = b.currentShell
-		tinput.User = b.currentUser
-		tinput.Workdir = b.currentWorkdir
-		b.instructions = append(b.instructions, tinput)
-	case commands.Shell:
-		b.currentShell = tinput
-	case commands.User:
-		b.currentUser = tinput
-	case commands.Volume:
-		tinput.User = b.currentUser
-		tinput.Workdir = b.currentWorkdir
-		b.instructions = append(b.instructions, tinput)
-	case commands.Workdir:
-		b.currentWorkdir = tinput
+func (b *defaultBuild) AddInstructions(instructions ...interface{}) error {
+	for _, input := range instructions {
+		switch tinput := input.(type) {
+		case commands.Add:
+			tinput.User = b.currentUser
+			tinput.Workdir = b.currentWorkdir
+			b.instructions = append(b.instructions, tinput)
+		case commands.Arg:
+			argValue, hadValue := tinput.Value()
+			if buildArgValue, ok := b.buildArgs[tinput.Key()]; ok {
+				argValue = buildArgValue
+			} else {
+				if !hadValue {
+					return fmt.Errorf("build arg %q: no value", tinput.Key())
+				}
+			}
+			key, value := b.buildEnv.Put(tinput.Key(), argValue)
+			b.currentArgs[key] = value
+		case commands.Cmd:
+			b.currentCmd = tinput
+		case commands.Copy:
+			tinput.User = b.currentUser
+			tinput.Workdir = b.currentWorkdir
+			b.instructions = append(b.instructions, tinput)
+		case commands.Entrypoint:
+			tinput.Env = b.currentEnv
+			tinput.Shell = b.currentShell
+			tinput.User = b.currentUser
+			tinput.Workdir = b.currentWorkdir
+			b.currentEntrypoint = tinput
+		case commands.Env:
+			key, value := b.buildEnv.Put(tinput.Name, tinput.Value)
+			b.currentEnv[key] = value
+		case commands.Expose:
+			b.exposedPorts = append(b.exposedPorts, tinput.RawValue)
+		case commands.From:
+			b.isDependencyBuild = tinput.StageName != ""
+			b.from = tinput
+		case commands.Label:
+			b.currentMetadata[tinput.Key] = b.buildEnv.Expand(tinput.Value)
+		case commands.Run:
+			tinput.Args = b.currentArgs
+			tinput.Env = b.currentEnv
+			tinput.Shell = b.currentShell
+			tinput.User = b.currentUser
+			tinput.Workdir = b.currentWorkdir
+			tinput.Command = b.buildEnv.Expand(tinput.Command)
+			b.instructions = append(b.instructions, tinput)
+		case commands.Shell:
+			b.currentShell = tinput
+		case commands.User:
+			b.currentUser = tinput
+		case commands.Volume:
+			tinput.User = b.currentUser
+			tinput.Workdir = b.currentWorkdir
+			b.instructions = append(b.instructions, tinput)
+		case commands.Workdir:
+			if strings.HasPrefix(tinput.Value, "/") {
+				b.currentWorkdir = tinput
+			} else {
+				b.currentWorkdir.Value = filepath.Join(b.currentWorkdir.Value, tinput.Value)
+			}
+		}
 	}
 
-	return b
+	return nil
 }
 
 func (b *defaultBuild) WithLogger(input hclog.Logger) Build {
@@ -320,6 +345,7 @@ func (b *defaultBuild) WithServiceInstaller(input string) Build {
 // NewDefaultBuild returns an instance of the default Build implementation.
 func NewDefaultBuild() Build {
 	return &defaultBuild{
+		buildEnv:          env.NewBuildEnv(),
 		currentArgs:       map[string]string{},
 		currentCmd:        commands.Cmd{Values: []string{}},
 		currentEntrypoint: commands.Entrypoint{Values: []string{}},
@@ -332,7 +358,7 @@ func NewDefaultBuild() Build {
 		instructions:      []interface{}{},
 		logger:            hclog.Default(),
 		resolver:          resources.NewDefaultResolver(),
-		resolvedResources: map[string]resources.ResolvedResource{},
+		resolvedResources: map[string][]resources.ResolvedResource{},
 	}
 }
 

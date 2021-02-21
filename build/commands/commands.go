@@ -1,22 +1,53 @@
 package commands
 
 import (
+	"fmt"
 	"strings"
 )
 
 // Add represents the ADD instruction.
 type Add struct {
-	OriginalSource string
-	Source         string
-	Target         string
-	Workdir        Workdir
-	User           User
+	OriginalSource     string
+	Source             string
+	Target             string
+	Workdir            Workdir
+	User               User
+	UserFromLocalChown *User
 }
 
 // Arg represents the ARG instruction.
 type Arg struct {
-	Name  string
-	Value string
+	k, v string
+	hadv bool
+}
+
+// NewRawArg returns a new parsed ARG from the raw input.
+func NewRawArg(input string) (Arg, error) {
+	parts := strings.Split(input, "=")
+	if len(parts) == 0 {
+		return Arg{}, fmt.Errorf("arg: missing name")
+	}
+	v, hadv := func(input []string) (string, bool) {
+		if len(input) > 1 {
+			return strings.Join(input[1:], "="), true
+		}
+		return "", false
+	}(parts)
+	return Arg{
+		k:    parts[0],
+		v:    v,
+		hadv: hadv,
+	}, nil
+}
+
+// Key returns the ARG key.
+func (a Arg) Key() string {
+	return a.k
+}
+
+// Value returns the ARG value and  a boolean indicating if value was defined in the Dockerfile.
+func (a Arg) Value() (string, bool) {
+	return a.v, a.hadv
 }
 
 // Cmd represents the CMD instruction.
@@ -26,11 +57,13 @@ type Cmd struct {
 
 // Copy represents the COPY instruction.
 type Copy struct {
-	OriginalSource string
-	Source         string
-	Target         string
-	Workdir        Workdir
-	User           User
+	OriginalSource     string
+	Source             string
+	Stage              string
+	Target             string
+	Workdir            Workdir
+	User               User
+	UserFromLocalChown *User
 }
 
 // Entrypoint represents the ENTRYPOINT instruction.
@@ -78,10 +111,11 @@ func (sf *StructuredFrom) Version() string {
 // From represents the FROM instruction.
 type From struct {
 	BaseImage string
+	StageName string
 }
 
 // ToStructuredFrom extracts structured info from the base image string.
-func (f *From) ToStructuredFrom() *StructuredFrom {
+func (f From) ToStructuredFrom() *StructuredFrom {
 	structuredForm := &StructuredFrom{org: "_"}
 	imageName := f.BaseImage
 	if strings.Contains(f.BaseImage, "/") {

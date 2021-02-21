@@ -12,9 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/appministry/firebuild/buildcontext"
-	"github.com/appministry/firebuild/buildcontext/commands"
-	"github.com/appministry/firebuild/buildcontext/utils"
+	"github.com/appministry/firebuild/build"
+	"github.com/appministry/firebuild/build/commands"
+	"github.com/appministry/firebuild/build/reader"
+	"github.com/appministry/firebuild/build/stage"
+	"github.com/appministry/firebuild/build/utils"
 	"github.com/appministry/firebuild/configs"
 	"github.com/appministry/firebuild/remote"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
@@ -50,6 +52,7 @@ type buildConfig struct {
 
 	PostBuildCommands []string
 	PreBuildCommands  []string
+	BuildArgs         map[string]string
 
 	JailerGID      int
 	JailerNumeNode int
@@ -115,6 +118,7 @@ func initFlags() {
 	Command.Flags().IntVar(&commandConfig.JailerUID, "jailer-uid", 0, "Jailer UID value")
 	Command.Flags().StringVar(&commandConfig.NetNS, "netns", "/var/lib/netns", "Network namespace")
 	// Bootstrap settings:
+	Command.Flags().StringToStringVar(&commandConfig.BuildArgs, "build-arg", map[string]string{}, "Build arguments, Multiple OK")
 	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
 	Command.Flags().StringArrayVar(&commandConfig.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
 	Command.Flags().StringArrayVar(&commandConfig.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
@@ -164,20 +168,38 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	// The first thing to do is to resolve the Dockerfile:
-	buildContext, err := buildcontext.NewFromString(commandConfig.Dockerfile, tempDirectory)
+	rawCommands, err := reader.ReadFromString(commandConfig.Dockerfile, tempDirectory)
 	if err != nil {
 		rootLogger.Error("failed parsing Dockerfile", "reason", err)
 		os.Exit(1)
 	}
+	scs, errs := stage.ReadStages(rawCommands)
+	for _, err := range errs {
+		rootLogger.Warn("stages read contained an error", "reason", err)
+	}
 
-	base := buildContext.From()
-	if base == nil {
-		rootLogger.Error("no base to build from")
+	unnamed := scs.Unnamed()
+	if len(unnamed) != 1 {
+		rootLogger.Error("expected exactly one unnamed build stage but found", "num-unnamed", len(unnamed))
+		os.Exit(1)
+	}
+
+	mainStage := unnamed[0]
+	if !mainStage.IsValid() {
+		rootLogger.Error("main build stage invalid: no base to build from")
 		cleanup.exec() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
-	structuredBase := base.ToStructuredFrom()
+
+	// The first thing to do is to resolve the Dockerfile:
+	buildContext := build.NewDefaultBuild()
+	if err := buildContext.AddInstructions(unnamed[0].Commands()...); err != nil {
+		rootLogger.Error("commands could not be processed", "reason", err)
+		cleanup.exec() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+
+	structuredBase := buildContext.From().ToStructuredFrom()
 
 	cleanup.add(func() {
 		rootLogger.Info("cleaning up temp build directory")

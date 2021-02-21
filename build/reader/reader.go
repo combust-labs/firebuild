@@ -1,4 +1,4 @@
-package buildcontext
+package reader
 
 import (
 	"bytes"
@@ -11,20 +11,21 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/appministry/firebuild/buildcontext/commands"
+	"github.com/appministry/firebuild/build/commands"
+	bcErrors "github.com/appministry/firebuild/build/errors"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 
 	git "github.com/go-git/go-git/v5"
 )
 
-// NewFromString creates a new build context from string.
+// ReadFromString reads commands from string.
 //
 // - literal Dockerfile content, ADD and COPY will not work
 // - http:// or httpL// URL
 // - git+http:// and git+https:// URL
 //   the format is: git+http(s)://host:port/path/to/repo.git:/path/to/Dockerfile[#<commit-hash | branch-name | tag-name>]
 // - absolute path to the local file
-func NewFromString(input string, tempDirectory string) (Build, error) {
+func ReadFromString(input string, tempDirectory string) ([]interface{}, error) {
 
 	if strings.HasPrefix(input, "git+http://") || strings.HasPrefix(input, "git+https://") {
 		u, _ := url.Parse(input)
@@ -84,14 +85,14 @@ func NewFromString(input string, tempDirectory string) (Build, error) {
 			return nil, statErr
 		}
 		if statResult.IsDir() {
-			return nil, &ErrorIsDirectory{Input: filePath}
+			return nil, &bcErrors.ErrorIsDirectory{Input: filePath}
 		}
 		bytes, err := ioutil.ReadFile(filePath)
 		if err != nil && err != io.EOF {
 			return nil, err
 		}
 
-		return NewFromBytesWithOriginalSource(bytes, filePath)
+		return ReadFromBytesWithOriginalSource(bytes, filePath)
 	}
 
 	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
@@ -104,7 +105,7 @@ func NewFromString(input string, tempDirectory string) (Build, error) {
 		if err != nil && err != io.EOF {
 			return nil, err
 		}
-		return NewFromBytesWithOriginalSource(bytes, input)
+		return ReadFromBytesWithOriginalSource(bytes, input)
 	}
 
 	statResult, statErr := os.Stat(input)
@@ -112,7 +113,7 @@ func NewFromString(input string, tempDirectory string) (Build, error) {
 
 		if statErr == os.ErrNotExist {
 			// assume literal input:
-			return NewFromBytes([]byte(input))
+			return ReadFromBytes([]byte(input))
 		}
 
 		if statErr != os.ErrNotExist {
@@ -121,82 +122,79 @@ func NewFromString(input string, tempDirectory string) (Build, error) {
 	}
 
 	if statResult.IsDir() {
-		return nil, &ErrorIsDirectory{Input: input}
+		return nil, &bcErrors.ErrorIsDirectory{Input: input}
 	}
 
 	bytes, err := ioutil.ReadFile(input)
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
-	return NewFromBytesWithOriginalSource(bytes, input)
+	return ReadFromBytesWithOriginalSource(bytes, input)
 
 }
 
-// NewFromBytes creates a new build context from bytes.
+// ReadFromBytes reads commands from bytes.
 // The bytes most often will be the Dockerfile string literal converted to bytes.
-func NewFromBytes(input []byte) (Build, error) {
+func ReadFromBytes(input []byte) ([]interface{}, error) {
 	parserResult, err := parser.Parse(bytes.NewReader(input))
 	if err != nil {
 		return nil, err
 	}
-	return NewFromParserResult(parserResult, "")
+	return ReadFromParserResult(parserResult, "")
 }
 
-// NewFromBytesWithOriginalSource creates a new build context from bytes and passes
+// ReadFromBytesWithOriginalSource reads commands from bytes and passes
 // the original source to the build context.
 // Use this method to automatically resolve the ADD / COPY dependencies.
-func NewFromBytesWithOriginalSource(input []byte, originalSource string) (Build, error) {
+func ReadFromBytesWithOriginalSource(input []byte, originalSource string) ([]interface{}, error) {
 	parserResult, err := parser.Parse(bytes.NewReader(input))
 	if err != nil {
 		return nil, err
 	}
-	return NewFromParserResult(parserResult, originalSource)
+	return ReadFromParserResult(parserResult, originalSource)
 }
 
-// NewFromParserResult creates a new build context from the Dockerfile parser result.
-func NewFromParserResult(parserResult *parser.Result, originalSource string) (Build, error) {
-	buildContext := NewDefaultBuild()
-	env := newBuildEnv()
+// ReadFromParserResult reads commands from the Dockerfile parser result.
+func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([]interface{}, error) {
+	output := []interface{}{}
 	for _, child := range parserResult.AST.Children {
 		switch child.Value {
 		case "add":
-			extracted := []string{}
+			values := []string{}
 			current := child.Next
 			for {
 				if current == nil {
 					break
 				}
-				extracted = append(extracted, current.Value)
+				values = append(values, current.Value)
 				current = current.Next
 			}
-			if len(extracted) != 2 {
-				return nil, fmt.Errorf("the ADD at %d must have exactly 2 elements", child.StartLine)
+			if len(values) == 2 {
+				flags := readFlags(child.Flags)
+				add := commands.Add{
+					OriginalSource: originalSource,
+					Source:         values[0],
+					Target:         values[1],
+				}
+				if chownVal, ok := flags.get("--chown"); ok {
+					add.UserFromLocalChown = &commands.User{Value: chownVal}
+				}
+				output = append(output, add)
+				continue
 			}
-			buildContext.WithInstruction(commands.Add{
-				OriginalSource: originalSource,
-				Source:         extracted[0],
-				Target:         extracted[1],
-			})
+			return output, fmt.Errorf("invalid COPY %q: %d", strings.Join(values, " "), child.StartLine)
 		case "arg":
-			extracted := []string{}
 			current := child.Next
 			for {
 				if current == nil {
 					break
 				}
-				extracted = append(extracted, current.Value)
-				current = current.Next
-			}
-			for i := 0; i < len(extracted); i++ {
-				argsParts := strings.Split(extracted[i], "=")
-				if len(argsParts) == 0 {
-					return nil, fmt.Errorf("the arg at %d is empty", child.StartLine)
+				arg, argErr := commands.NewRawArg(current.Value)
+				if argErr != nil {
+					return output, fmt.Errorf("arg at %d: %+v", child.StartLine, argErr)
 				}
-				name, value := env.put(argsParts[0], strings.Join(argsParts[1:], "="))
-				buildContext.WithInstruction(commands.Arg{
-					Name:  name,
-					Value: value,
-				})
+				output = append(output, arg)
+				current = current.Next
 			}
 		case "cmd":
 			cmd := commands.Cmd{Values: []string{}}
@@ -208,25 +206,32 @@ func NewFromParserResult(parserResult *parser.Result, originalSource string) (Bu
 				cmd.Values = append(cmd.Values, current.Value)
 				current = current.Next
 			}
-			buildContext.WithInstruction(cmd)
+			output = append(output, cmd)
 		case "copy":
-			extracted := []string{}
+			values := []string{}
 			current := child.Next
 			for {
 				if current == nil {
 					break
 				}
-				extracted = append(extracted, current.Value)
+				values = append(values, current.Value)
 				current = current.Next
 			}
-			if len(extracted) != 2 {
-				return nil, fmt.Errorf("the cmd at %d must have exactly 2 elements", child.StartLine)
+			if len(values) == 2 {
+				flags := readFlags(child.Flags)
+				copy := commands.Copy{
+					OriginalSource: originalSource,
+					Source:         values[0],
+					Stage:          flags.getOrDefault("--from", ""),
+					Target:         values[1],
+				}
+				if chownVal, ok := flags.get("--chown"); ok {
+					copy.UserFromLocalChown = &commands.User{Value: chownVal}
+				}
+				output = append(output, copy)
+				continue
 			}
-			buildContext.WithInstruction(commands.Copy{
-				OriginalSource: originalSource,
-				Source:         extracted[0],
-				Target:         extracted[1],
-			})
+			return output, fmt.Errorf("invalid COPY %q: %d", strings.Join(values, " "), child.StartLine)
 		case "entrypoint":
 			entrypoint := commands.Entrypoint{Values: []string{}}
 			current := child.Next
@@ -237,7 +242,7 @@ func NewFromParserResult(parserResult *parser.Result, originalSource string) (Bu
 				entrypoint.Values = append(entrypoint.Values, current.Value)
 				current = current.Next
 			}
-			buildContext.WithInstruction(entrypoint)
+			output = append(output, entrypoint)
 		case "env":
 			extracted := []string{}
 			current := child.Next
@@ -252,10 +257,10 @@ func NewFromParserResult(parserResult *parser.Result, originalSource string) (Bu
 				return nil, fmt.Errorf("the env at %d is not complete", child.StartLine)
 			}
 			for i := 0; i < len(extracted); i = i + 2 {
-				name, value := env.put(extracted[i], extracted[i+1])
-				buildContext.WithInstruction(commands.Env{
-					Name:  name,
-					Value: value,
+				//name, value := env.put(, )
+				output = append(output, commands.Env{
+					Name:  extracted[i],
+					Value: extracted[i+1],
 				})
 			}
 		case "expose":
@@ -264,14 +269,31 @@ func NewFromParserResult(parserResult *parser.Result, originalSource string) (Bu
 				if current == nil {
 					break
 				}
-				buildContext.WithInstruction(commands.Expose{RawValue: current.Value})
+				output = append(output, commands.Expose{RawValue: current.Value})
 				current = current.Next
 			}
 		case "from":
-			if child.Next == nil {
-				return nil, fmt.Errorf("expected from value")
+			values := []string{}
+			current := child.Next
+			for {
+				if current == nil {
+					break
+				}
+				values = append(values, current.Value)
+				current = current.Next
 			}
-			buildContext.WithFrom(&commands.From{BaseImage: child.Next.Value})
+			// There are following variations of FROM:
+			// - FROM source
+			// - FROM source as stage
+			if len(values) == 1 {
+				output = append(output, commands.From{BaseImage: values[0]})
+				continue
+			}
+			if len(values) == 3 {
+				output = append(output, commands.From{BaseImage: values[0], StageName: values[2]})
+				continue
+			}
+			return output, fmt.Errorf("invalid FROM %q: %d", strings.Join(values, " "), child.StartLine)
 		case "healthcheck":
 			// ignore for now
 			// TODO: these can be for sure used but at a higher level
@@ -289,9 +311,9 @@ func NewFromParserResult(parserResult *parser.Result, originalSource string) (Bu
 				return nil, fmt.Errorf("the label at %d is not complete", child.StartLine)
 			}
 			for i := 0; i < len(extracted); i = i + 2 {
-				buildContext.WithInstruction(commands.Label{
+				output = append(output, commands.Label{
 					Key:   extracted[i],
-					Value: env.expand(extracted[i+1]),
+					Value: extracted[i+1], // TODO: env.expand()...
 				})
 			}
 		case "maintainer":
@@ -305,8 +327,8 @@ func NewFromParserResult(parserResult *parser.Result, originalSource string) (Bu
 				if current == nil {
 					break
 				}
-				buildContext.WithInstruction(commands.Run{
-					Command: env.expand(current.Value),
+				output = append(output, commands.Run{
+					Command: current.Value, // TODO: env.expand()...
 				})
 				current = current.Next
 			}
@@ -320,14 +342,14 @@ func NewFromParserResult(parserResult *parser.Result, originalSource string) (Bu
 				shell.Commands = append(shell.Commands, current.Value)
 				current = current.Next
 			}
-			buildContext.WithInstruction(shell)
+			output = append(output, shell)
 		case "stopsignal":
 			// TODO: incorporate because the OS service manager can take advantage of this
 		case "user":
 			if child.Next == nil {
 				return nil, fmt.Errorf("expected user value")
 			}
-			buildContext.WithInstruction(commands.User{Value: child.Next.Value})
+			output = append(output, commands.User{Value: child.Next.Value})
 		case "volume":
 			vols := commands.Volume{Values: []string{}}
 			current := child.Next
@@ -338,14 +360,14 @@ func NewFromParserResult(parserResult *parser.Result, originalSource string) (Bu
 				vols.Values = append(vols.Values, current.Value)
 				current = current.Next
 			}
-			buildContext.WithInstruction(vols)
+			output = append(output, vols)
 		case "workdir":
 			if child.Next == nil {
 				return nil, fmt.Errorf("expected workdir value")
 			}
-			buildContext.WithInstruction(commands.Workdir{Value: child.Next.Value})
+			output = append(output, commands.Workdir{Value: child.Next.Value})
 		}
 	}
 
-	return buildContext, nil
+	return output, nil
 }

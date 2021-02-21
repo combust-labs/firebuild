@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/appministry/firebuild/buildcontext/commands"
-	"github.com/appministry/firebuild/buildcontext/resources"
-	"github.com/appministry/firebuild/buildcontext/utils"
+	"github.com/appministry/firebuild/build/commands"
+	"github.com/appministry/firebuild/build/resources"
+	"github.com/appministry/firebuild/build/utils"
 	"github.com/hashicorp/go-hclog"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -206,12 +206,21 @@ func (dcc *defaultConnectedClient) RunCommand(command commands.Run) error {
 	}
 	go io.Copy(os.Stderr, stderr)
 
+	// We're running the commands by wrapping the command in the shell call so sshSession.Setenv might not do what we intend.
+	// Also, we don't really know which shell are we running because it comes as an argument to us
+	// so we can't, for example, assume bourne shell -a...
+	envString := ""
+	for k, v := range command.Env {
+		envString = fmt.Sprintf("%s%s='%s' ", envString, k, strings.ReplaceAll(v, "'", "''"))
+	}
+
 	remoteCommand := fmt.Sprintf("sudo mkdir -p %s && sudo %s '%s'\n",
 		command.Workdir.Value,
 		strings.Join(command.Shell.Commands, " "),
-		strings.ReplaceAll(command.Command, "'", "''"))
+		strings.ReplaceAll(envString+command.Command, "'", "''"))
 
-	dcc.logger.Debug("Running remote command", "command", remoteCommand)
+	dcc.logger.Debug("Running remote command", "command", remoteCommand, "env", command.Env)
+
 	if err := sshSession.Start(remoteCommand); err != nil {
 		return fmt.Errorf("Unable to start the SSH session: %v", err)
 	}

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/appministry/firebuild/buildcontext/commands"
+	"github.com/appministry/firebuild/build/commands"
 )
 
 // ResolvedResource contains the data and the metadata of the resolved resource.
@@ -64,8 +64,8 @@ func (drr *defaultResolvedResource) TargetUser() commands.User {
 
 // Resolver resolves ADD and COPY dependencies.
 type Resolver interface {
-	ResolveAdd(res commands.Add) (ResolvedResource, error)
-	ResolveCopy(res commands.Copy) (ResolvedResource, error)
+	ResolveAdd(res commands.Add) ([]ResolvedResource, error)
+	ResolveCopy(res commands.Copy) ([]ResolvedResource, error)
 }
 
 type defaultResolver struct {
@@ -77,16 +77,29 @@ func NewDefaultResolver() Resolver {
 }
 
 // ResolveAdd resolves an ADD command resource.
-func (dr *defaultResolver) ResolveAdd(res commands.Add) (ResolvedResource, error) {
-	return dr.resolveResource(res.OriginalSource, res.Source, res.Target, res.Workdir, res.User)
+func (dr *defaultResolver) ResolveAdd(res commands.Add) ([]ResolvedResource, error) {
+	return dr.resolveResources(res.OriginalSource, res.Source, res.Target, res.Workdir, func() commands.User {
+		if res.UserFromLocalChown != nil {
+			return *res.UserFromLocalChown
+		}
+		return res.User
+	}())
 }
 
 // ResolveCopy resolves a COPY command resource.
-func (dr *defaultResolver) ResolveCopy(res commands.Copy) (ResolvedResource, error) {
-	return dr.resolveResource(res.OriginalSource, res.Source, res.Target, res.Workdir, res.User)
+func (dr *defaultResolver) ResolveCopy(res commands.Copy) ([]ResolvedResource, error) {
+	return dr.resolveResources(res.OriginalSource, res.Source, res.Target, res.Workdir, func() commands.User {
+		if res.UserFromLocalChown != nil {
+			return *res.UserFromLocalChown
+		}
+		return res.User
+	}())
 }
 
-func (dr *defaultResolver) resolveResource(originalSource, resourcePath, targetPath string, targetWorkdir commands.Workdir, targetUser commands.User) (ResolvedResource, error) {
+func (dr *defaultResolver) resolveResources(originalSource, resourcePath, targetPath string, targetWorkdir commands.Workdir, targetUser commands.User) ([]ResolvedResource, error) {
+
+	resources := []ResolvedResource{}
+
 	if originalSource == "" {
 		return nil, fmt.Errorf("empty: '%s' not resolvable", resourcePath)
 	}
@@ -108,45 +121,53 @@ func (dr *defaultResolver) resolveResource(originalSource, resourcePath, targetP
 		if err != nil {
 			return nil, fmt.Errorf("http resource failed: could not GET resource '%s', reason: %+v", newPath, err)
 		}
-		return &defaultResolvedResource{data: bodyBytes,
+		return append(resources, &defaultResolvedResource{data: bodyBytes,
 			resolved:      newPath,
 			targetMode:    fs.FileMode(0644),
 			targetPath:    targetPath,
 			targetWorkdir: targetWorkdir,
-			targetUser:    targetUser}, nil
+			targetUser:    targetUser}), nil
 	}
 
 	newPath := filepath.Join(filepath.Dir(originalSource), resourcePath)
 	if !strings.HasPrefix(newPath, filepath.Dir(originalSource)) {
 		return nil, fmt.Errorf("resource failed: resolved '%s' not in the context of '%s'", newPath, filepath.Dir(originalSource))
 	}
-	statResult, statErr := os.Stat(newPath)
-	if statErr != nil {
-		if statErr == os.ErrNotExist {
-			return nil, fmt.Errorf("resource failed: resolved '%s' not found locally", newPath)
-		}
-	}
-	if statResult.IsDir() {
-		return &defaultResolvedResource{data: []byte{},
-			isDir:         true,
-			resolved:      newPath,
-			targetMode:    statResult.Mode(),
-			targetPath:    targetPath,
-			targetWorkdir: targetWorkdir,
-			targetUser:    targetUser}, nil
-	}
-	fileBytes, err := ioutil.ReadFile(newPath)
+
+	matches, err := filepath.Glob(newPath)
 	if err != nil {
-		return nil, fmt.Errorf("resource failed: could not read resource '%s', reason:  %+v", newPath, err)
+		return nil, fmt.Errorf("resource failed: filepath glob error for path '%s', reason:  %+v", newPath, err)
 	}
 
-	return &defaultResolvedResource{data: fileBytes,
-		isDir:         false,
-		resolved:      newPath,
-		targetMode:    statResult.Mode(),
-		targetPath:    targetPath,
-		targetWorkdir: targetWorkdir,
-		targetUser:    targetUser}, nil
+	for _, match := range matches {
+		statResult, statErr := os.Stat(match)
+		if statErr != nil {
+			return nil, fmt.Errorf("resource failed: resolved '%s', reason: %v", match, statErr)
+		}
+		if statResult.IsDir() {
+			resources = append(resources, &defaultResolvedResource{data: []byte{},
+				isDir:         true,
+				resolved:      newPath,
+				targetMode:    statResult.Mode(),
+				targetPath:    targetPath,
+				targetWorkdir: targetWorkdir,
+				targetUser:    targetUser})
+		} else {
+			fileBytes, err := ioutil.ReadFile(newPath)
+			if err != nil {
+				return nil, fmt.Errorf("resource failed: could not read resource '%s', reason:  %+v", newPath, err)
+			}
+			resources = append(resources, &defaultResolvedResource{data: fileBytes,
+				isDir:         false,
+				resolved:      newPath,
+				targetMode:    statResult.Mode(),
+				targetPath:    targetPath,
+				targetWorkdir: targetWorkdir,
+				targetUser:    targetUser})
+		}
+	}
+
+	return resources, nil
 }
 
 // NewResolvedFileResource creates a resolved resource from input information.
