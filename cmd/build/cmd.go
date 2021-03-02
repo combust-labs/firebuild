@@ -167,13 +167,13 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	rawCommands, err := reader.ReadFromString(commandConfig.Dockerfile, tempDirectory)
+	readResults, err := reader.ReadFromString(commandConfig.Dockerfile, tempDirectory)
 	if err != nil {
 		rootLogger.Error("failed parsing Dockerfile", "reason", err)
 		os.Exit(1)
 	}
 
-	scs, errs := stage.ReadStages(rawCommands)
+	scs, errs := stage.ReadStages(readResults.Commands())
 	for _, err := range errs {
 		rootLogger.Warn("stages read contained an error", "reason", err)
 	}

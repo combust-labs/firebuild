@@ -14,6 +14,7 @@ import (
 	"github.com/appministry/firebuild/build/env"
 	"github.com/appministry/firebuild/build/resources"
 	"github.com/appministry/firebuild/remote"
+	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"
 )
 
@@ -28,6 +29,7 @@ type Build interface {
 	Metadata() map[string]string
 	WithBuildArgs(map[string]string) Build
 	WithDependencyResources(map[string][]resources.ResolvedResource) Build
+	WithExcludes([]string) Build
 	WithLogger(hclog.Logger) Build
 	WithPostBuildCommands(...commands.Run) Build
 	WithPreBuildCommands(...commands.Run) Build
@@ -48,6 +50,7 @@ type defaultBuild struct {
 	currentWorkdir     commands.Workdir
 	dependentResources map[string][]resources.ResolvedResource
 	exposedPorts       []string
+	excludes           []string
 	from               commands.From
 	instructions       []interface{}
 	isDependencyBuild  bool
@@ -62,6 +65,12 @@ type defaultBuild struct {
 }
 
 func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
+
+	patternMatcher, matcherCreateErr := fileutils.NewPatternMatcher(b.excludes)
+	if matcherCreateErr != nil {
+		b.logger.Error("failed creating excludes pattern matcher", "reason", matcherCreateErr)
+		return matcherCreateErr
+	}
 
 	b.logger.Info("building from", "base", b.from.BaseImage)
 
@@ -95,6 +104,18 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 		switch tcommand := command.(type) {
 		case commands.Add:
 			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
+
+				pathMatched, matchErr := patternMatcher.Matches(tcommand.Source)
+				if matchErr != nil {
+					b.logger.Warn("error while matching path for PutResource ADD, skipping", "source", tcommand.Source, "reason", matchErr)
+					continue // skip this resource
+				}
+				if pathMatched {
+					// file to be excluded
+					b.logger.Debug("skipping excluded path for PutResource ADD", "source", tcommand.Source)
+					continue
+				}
+
 				b.logger.Info("Putting ADD resource", "source", tcommand.Source)
 				for _, resourceItem := range resource {
 					if err := remoteClient.PutResource(resourceItem); err != nil {
@@ -106,6 +127,18 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 				b.logger.Error("resource ADD type required but not resolved", "source", tcommand.Source)
 			}
 		case commands.Copy:
+
+			pathMatched, matchErr := patternMatcher.Matches(tcommand.Source)
+			if matchErr != nil {
+				b.logger.Warn("error while matching path for PutResource COPY, skipping", "source", tcommand.Source, "reason", matchErr)
+				continue // skip this resource
+			}
+			if pathMatched {
+				// file to be excluded
+				b.logger.Debug("skipping excluded path for PutResource COPY", "source", tcommand.Source)
+				continue
+			}
+
 			// dependency resources exist for COPY commands only:
 			if tcommand.Stage != "" {
 				// we need to locate a dependency resource
@@ -130,6 +163,7 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 				}
 				continue
 			}
+
 			b.logger.Info("Putting COPY resource", "source", tcommand.Source)
 			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
 				for _, resourceItem := range resource {
@@ -141,6 +175,7 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 			} else {
 				b.logger.Error("resource COPY type required but not resolved", "source", tcommand.Source)
 			}
+
 		case commands.Run:
 			if err := remoteClient.RunCommand(tcommand); err != nil {
 				b.logger.Error("RunCommand failed", "reason", err)
@@ -270,23 +305,6 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 	return nil
 }
 
-func (b *defaultBuild) ExposedPorts() []string {
-	return b.exposedPorts
-}
-
-func (b *defaultBuild) From() commands.From {
-	return b.from
-}
-
-func (b *defaultBuild) Metadata() map[string]string {
-	return b.currentMetadata
-}
-
-func (b *defaultBuild) WithBuildArgs(input map[string]string) Build {
-	b.buildArgs = input
-	return b
-}
-
 func (b *defaultBuild) AddInstructions(instructions ...interface{}) error {
 	for _, input := range instructions {
 		switch tinput := input.(type) {
@@ -355,8 +373,30 @@ func (b *defaultBuild) AddInstructions(instructions ...interface{}) error {
 	return nil
 }
 
+func (b *defaultBuild) ExposedPorts() []string {
+	return b.exposedPorts
+}
+
+func (b *defaultBuild) From() commands.From {
+	return b.from
+}
+
+func (b *defaultBuild) Metadata() map[string]string {
+	return b.currentMetadata
+}
+
+func (b *defaultBuild) WithBuildArgs(input map[string]string) Build {
+	b.buildArgs = input
+	return b
+}
+
 func (b *defaultBuild) WithDependencyResources(input map[string][]resources.ResolvedResource) Build {
 	b.dependentResources = input
+	return b
+}
+
+func (b *defaultBuild) WithExcludes(input []string) Build {
+	b.excludes = input
 	return b
 }
 

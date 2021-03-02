@@ -24,12 +24,12 @@ func TestDependencyBuild(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	cmds, err := reader.ReadFromString("git+https://github.com/grepplabs/kafka-proxy.git:/Dockerfile", tempDir)
+	readResults, err := reader.ReadFromString("git+https://github.com/grepplabs/kafka-proxy.git:/Dockerfile", tempDir)
 	if err != nil {
 		t.Fatal("Expected dockefile to parse but received an error", err)
 	}
 
-	stages, errs := stage.ReadStages(cmds)
+	stages, errs := stage.ReadStages(readResults.Commands())
 	if len(errs) > 0 {
 		t.Log("Unexpected errors while processing stages", errs)
 	}

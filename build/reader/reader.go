@@ -13,10 +13,37 @@ import (
 
 	"github.com/appministry/firebuild/build/commands"
 	bcErrors "github.com/appministry/firebuild/build/errors"
+	"github.com/docker/docker/builder/dockerignore"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 
 	git "github.com/go-git/go-git/v5"
 )
+
+// ReadResult contains the parsed commands and optionally .dockerignore patterns.
+type ReadResult interface {
+	Commands() []interface{}
+	ExcludePatterns() []string
+}
+
+type defaultReadResult struct {
+	commands        []interface{}
+	excludePatterns []string
+}
+
+func newDefaultReadResult(commands []interface{}) ReadResult {
+	return &defaultReadResult{commands: commands, excludePatterns: []string{}}
+}
+
+func newDefaultReadResultWithExcludePatterns(commands []interface{}, patterns []string) ReadResult {
+	return &defaultReadResult{commands: commands, excludePatterns: patterns}
+}
+
+func (dr *defaultReadResult) Commands() []interface{} {
+	return dr.commands
+}
+func (dr *defaultReadResult) ExcludePatterns() []string {
+	return dr.excludePatterns
+}
 
 // ReadFromString reads commands from string.
 //
@@ -25,7 +52,7 @@ import (
 // - git+http:// and git+https:// URL
 //   the format is: git+http(s)://host:port/path/to/repo.git:/path/to/Dockerfile[#<commit-hash | branch-name | tag-name>]
 // - absolute path to the local file
-func ReadFromString(input string, tempDirectory string) ([]interface{}, error) {
+func ReadFromString(input string, tempDirectory string) (ReadResult, error) {
 
 	if strings.HasPrefix(input, "git+http://") || strings.HasPrefix(input, "git+https://") {
 		u, _ := url.Parse(input)
@@ -92,7 +119,16 @@ func ReadFromString(input string, tempDirectory string) ([]interface{}, error) {
 			return nil, err
 		}
 
-		return ReadFromBytesWithOriginalSource(bytes, filePath)
+		excludes, excludesErr := readExcludes(filePath)
+		if excludesErr != nil {
+			return nil, excludesErr
+		}
+		commands, commandsErr := ReadFromBytesWithOriginalSource(bytes, filePath)
+		if commandsErr != nil {
+			return nil, commandsErr
+		}
+
+		return newDefaultReadResultWithExcludePatterns(commands, excludes), nil
 	}
 
 	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
@@ -105,20 +141,24 @@ func ReadFromString(input string, tempDirectory string) ([]interface{}, error) {
 		if err != nil && err != io.EOF {
 			return nil, err
 		}
-		return ReadFromBytesWithOriginalSource(bytes, input)
+		commands, commandsErr := ReadFromBytesWithOriginalSource(bytes, input)
+		if commandsErr != nil {
+			return nil, commandsErr
+		}
+		return newDefaultReadResult(commands), nil
 	}
 
 	statResult, statErr := os.Stat(input)
 	if statErr != nil {
-
-		if statErr == os.ErrNotExist {
+		if os.IsNotExist(statErr) {
 			// assume literal input:
-			return ReadFromBytes([]byte(input))
+			commands, commandsErr := ReadFromBytes([]byte(input))
+			if commandsErr != nil {
+				return nil, commandsErr
+			}
+			return newDefaultReadResult(commands), nil
 		}
-
-		if statErr != os.ErrNotExist {
-			return nil, statErr
-		}
+		return nil, statErr
 	}
 
 	if statResult.IsDir() {
@@ -129,7 +169,17 @@ func ReadFromString(input string, tempDirectory string) ([]interface{}, error) {
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
-	return ReadFromBytesWithOriginalSource(bytes, input)
+
+	excludes, excludesErr := readExcludes(input)
+	if excludesErr != nil {
+		return nil, excludesErr
+	}
+	commands, commandsErr := ReadFromBytesWithOriginalSource(bytes, input)
+	if commandsErr != nil {
+		return nil, commandsErr
+	}
+
+	return newDefaultReadResultWithExcludePatterns(commands, excludes), nil
 
 }
 
@@ -379,4 +429,28 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 	}
 
 	return output, nil
+}
+
+func readExcludes(dockerfilePath string) ([]string, error) {
+	emptyResponse := []string{}
+	// is there a .dockerignore next to the image?
+	dockerignoreFilePath := filepath.Join(filepath.Dir(dockerfilePath), ".dockerignore")
+	_, statErr := os.Stat(dockerignoreFilePath)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return emptyResponse, nil
+		}
+		return emptyResponse, fmt.Errorf("Not able to check if .dockerignore file exists: %+v", statErr)
+	}
+	ignoreFile, fileErr := os.Open(dockerignoreFilePath)
+	if fileErr != nil {
+		return emptyResponse, fmt.Errorf("Not able to open .dockerignore file: %+v", fileErr)
+	}
+	defer ignoreFile.Close()
+
+	excludePatterns, ignoreReadErr := dockerignore.ReadAll(ignoreFile)
+	if ignoreReadErr != nil {
+		return emptyResponse, fmt.Errorf("Not able to read .dockerignore file: %+v", ignoreReadErr)
+	}
+	return excludePatterns, nil
 }
