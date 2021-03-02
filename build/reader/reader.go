@@ -172,9 +172,10 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 			if len(values) == 2 {
 				flags := readFlags(child.Flags)
 				add := commands.Add{
-					OriginalSource: originalSource,
-					Source:         values[0],
-					Target:         values[1],
+					OriginalCommand: child.Original,
+					OriginalSource:  originalSource,
+					Source:          values[0],
+					Target:          values[1],
 				}
 				if chownVal, ok := flags.get("--chown"); ok {
 					add.UserFromLocalChown = &commands.User{Value: chownVal}
@@ -182,7 +183,7 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 				output = append(output, add)
 				continue
 			}
-			return output, fmt.Errorf("invalid COPY %q: %d", strings.Join(values, " "), child.StartLine)
+			return output, fmt.Errorf("invalid ADD %q: %d", strings.Join(values, " "), child.StartLine)
 		case "arg":
 			current := child.Next
 			for {
@@ -193,11 +194,12 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 				if argErr != nil {
 					return output, fmt.Errorf("arg at %d: %+v", child.StartLine, argErr)
 				}
+				arg.OriginalCommand = child.Original
 				output = append(output, arg)
 				current = current.Next
 			}
 		case "cmd":
-			cmd := commands.Cmd{Values: []string{}}
+			cmd := commands.Cmd{Values: []string{}, OriginalCommand: child.Original}
 			current := child.Next
 			for {
 				if current == nil {
@@ -220,10 +222,11 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 			if len(values) == 2 {
 				flags := readFlags(child.Flags)
 				copy := commands.Copy{
-					OriginalSource: originalSource,
-					Source:         values[0],
-					Stage:          flags.getOrDefault("--from", ""),
-					Target:         values[1],
+					OriginalCommand: child.Original,
+					OriginalSource:  originalSource,
+					Source:          values[0],
+					Stage:           flags.getOrDefault("--from", ""),
+					Target:          values[1],
 				}
 				if chownVal, ok := flags.get("--chown"); ok {
 					copy.UserFromLocalChown = &commands.User{Value: chownVal}
@@ -233,7 +236,7 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 			}
 			return output, fmt.Errorf("invalid COPY %q: %d", strings.Join(values, " "), child.StartLine)
 		case "entrypoint":
-			entrypoint := commands.Entrypoint{Values: []string{}}
+			entrypoint := commands.Entrypoint{Values: []string{}, OriginalCommand: child.Original}
 			current := child.Next
 			for {
 				if current == nil {
@@ -259,8 +262,9 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 			for i := 0; i < len(extracted); i = i + 2 {
 				//name, value := env.put(, )
 				output = append(output, commands.Env{
-					Name:  extracted[i],
-					Value: extracted[i+1],
+					OriginalCommand: child.Original,
+					Name:            extracted[i],
+					Value:           extracted[i+1],
 				})
 			}
 		case "expose":
@@ -269,7 +273,7 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 				if current == nil {
 					break
 				}
-				output = append(output, commands.Expose{RawValue: current.Value})
+				output = append(output, commands.Expose{RawValue: current.Value, OriginalCommand: child.Original})
 				current = current.Next
 			}
 		case "from":
@@ -286,11 +290,14 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 			// - FROM source
 			// - FROM source as stage
 			if len(values) == 1 {
-				output = append(output, commands.From{BaseImage: values[0]})
+				output = append(output, commands.From{BaseImage: values[0],
+					OriginalCommand: child.Original})
 				continue
 			}
 			if len(values) == 3 {
-				output = append(output, commands.From{BaseImage: values[0], StageName: values[2]})
+				output = append(output, commands.From{BaseImage: values[0],
+					StageName:       values[2],
+					OriginalCommand: child.Original})
 				continue
 			}
 			return output, fmt.Errorf("invalid FROM %q: %d", strings.Join(values, " "), child.StartLine)
@@ -312,8 +319,9 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 			}
 			for i := 0; i < len(extracted); i = i + 2 {
 				output = append(output, commands.Label{
-					Key:   extracted[i],
-					Value: extracted[i+1], // TODO: env.expand()...
+					OriginalCommand: child.Original,
+					Key:             extracted[i],
+					Value:           extracted[i+1],
 				})
 			}
 		case "maintainer":
@@ -328,12 +336,13 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 					break
 				}
 				output = append(output, commands.Run{
-					Command: current.Value, // TODO: env.expand()...
+					OriginalCommand: child.Original,
+					Command:         current.Value,
 				})
 				current = current.Next
 			}
 		case "shell":
-			shell := commands.Shell{Commands: []string{}}
+			shell := commands.Shell{Commands: []string{}, OriginalCommand: child.Original}
 			current := child.Next
 			for {
 				if current == nil {
@@ -349,9 +358,9 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 			if child.Next == nil {
 				return nil, fmt.Errorf("expected user value")
 			}
-			output = append(output, commands.User{Value: child.Next.Value})
+			output = append(output, commands.User{Value: child.Next.Value, OriginalCommand: child.Original})
 		case "volume":
-			vols := commands.Volume{Values: []string{}}
+			vols := commands.Volume{Values: []string{}, OriginalCommand: child.Original}
 			current := child.Next
 			for {
 				if current == nil {
@@ -365,7 +374,7 @@ func ReadFromParserResult(parserResult *parser.Result, originalSource string) ([
 			if child.Next == nil {
 				return nil, fmt.Errorf("expected workdir value")
 			}
-			output = append(output, commands.Workdir{Value: child.Next.Value})
+			output = append(output, commands.Workdir{Value: child.Next.Value, OriginalCommand: child.Original})
 		}
 	}
 

@@ -1,9 +1,11 @@
 package remote
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"net"
 	"os"
@@ -24,6 +26,8 @@ import (
 const (
 	defaultMaxPacketSize  = 32768
 	defaultTimeoutSeconds = 10
+
+	defaultResourceReaderBufferSizeBytes = 1048576
 )
 
 // TODO: validate host key in the future
@@ -240,88 +244,210 @@ func (dcc *defaultConnectedClient) RunCommand(command commands.Run) error {
 
 func (dcc *defaultConnectedClient) PutResource(resource resources.ResolvedResource) error {
 	if !resource.IsDir() {
+		return dcc.putFileResource(resource)
+	}
+	return dcc.putDirectoryResource(resource)
+}
 
-		bootstrapDir := filepath.Join("/tmp", utils.RandStringBytes(32))
-		randomFileName := utils.RandStringBytes(32)
-		tempDestination := filepath.Join(bootstrapDir, randomFileName)
+func (dcc *defaultConnectedClient) putDirectoryResource(resource resources.ResolvedResource) error {
 
-		// 1. Create a bootstrap directory:
+	bootstrapDir := filepath.Join("/tmp", utils.RandStringBytes(32))
+	destination := filepath.Join(resource.TargetWorkdir().Value, resource.TargetPath())
+	src := resource.ResolvedURIOrPath()
+	if !strings.HasSuffix(src, "/") {
+		src = src + "/"
+	}
 
-		runErrBootstrapDir := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && chown -R %s '%s'",
-			bootstrapDir,
-			dcc.connectedUser,
-			bootstrapDir)))
-		if runErrBootstrapDir != nil {
-			return runErrBootstrapDir
-		}
+	// 1. Create a bootstrap directory:
+	runErrBootstrapDir := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && chown -R %s '%s'",
+		bootstrapDir,
+		dcc.connectedUser,
+		bootstrapDir)))
+	if runErrBootstrapDir != nil {
+		return runErrBootstrapDir
+	}
 
-		// 2. Put the file at the temporary destination:
-
-		f, err := dcc.sftpClient.Create(tempDestination)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		requiredBytes := len(resource.Bytes())
-		written, err := f.Write(resource.Bytes())
-		if err != nil {
-			return err
-		}
-		if written != len(resource.Bytes()) {
-			return fmt.Errorf("write incomplete for '%s': written bytes: %d, file had: %d", resource.TargetPath(), written, requiredBytes)
-		}
-
-		f.Close()
-
-		dcc.logger.Debug("Resource uploaded to temporary destination", "resource", resource.TargetPath(), "temp-destination", tempDestination)
-
-		// 3. chmod it:
-		// can't chmod it using the SFTP client because it may not be the right user...
-		modeStrRepr := strconv.FormatUint(uint64(resource.TargetMode()), 8)
-		runErrChmod := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chmod 0%s %s", modeStrRepr, tempDestination)))
-		if runErrChmod != nil {
-			dcc.logger.Warn("WARNING: chmod failed",
-				"resource", resource.TargetPath(),
-				"temp-destination", tempDestination,
-				"reason", runErrChmod)
-		}
-
-		// 4. chown it
-		if resource.TargetUser().Value != "" {
-			// can't chown using the SFTP client because it may not be the right user...
-			runErrChown := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chown %s %s", resource.TargetUser().Value, tempDestination)))
-			if runErrChown != nil {
-				dcc.logger.Warn("WARNING: chown failed",
-					"resource", resource.TargetPath(),
-					"temp-destination", tempDestination,
-					"reason", runErrChown)
+	// 2. Upload the directory to the temp location:
+	// this bit comes from the Terraform SSH communicator:
+	scpFunc := func(w io.Writer, r *bufio.Reader) error {
+		uploadEntries := func() error {
+			f, err := os.Open(src)
+			if err != nil {
+				return err
 			}
-		}
+			defer f.Close()
 
-		// 5. Move it to the final destination:
-		destination := filepath.Join(resource.TargetWorkdir().Value, resource.TargetPath())
-		destinationDirectory := filepath.Dir(destination)
-		runErrMove := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && mv '%s' '%s'", destinationDirectory, tempDestination, destination)))
-		if runErrMove != nil {
-			return runErrMove
-		}
+			entries, err := f.Readdir(-1)
+			if err != nil {
+				return err
+			}
 
-		// 6. Clean up
-		runErrCleanup := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("rm -r '%s'", bootstrapDir)))
-		if runErrCleanup != nil {
-			dcc.logger.Warn("WARNING: failed cleaning up the bootstrap directory",
-				"bootstrap-dir", bootstrapDir,
-				"reason", runErrCleanup)
+			return scpUploadDir(dcc.logger, resource.ResolvedURIOrPath(), entries, w, r)
 		}
+		if src[len(src)-1] != '/' {
+			dcc.logger.Debug("No trailing slash, creating the source directory name")
+			return scpUploadDirProtocol(dcc.logger, fs.FileMode(0755), filepath.Base(src), w, r, uploadEntries)
+		}
+		// Trailing slash, so only upload the contents
+		return uploadEntries()
+	}
 
-		dcc.logger.Debug("Resource moved to final destination",
+	if scpErr := dcc.scpSession("scp -rvt "+bootstrapDir, scpFunc); scpErr != nil {
+		dcc.logger.Error("SCP command failed, directory upload failed",
+			"resource", resource.TargetPath(),
+			"temp-destination", bootstrapDir,
+			"reason", scpErr)
+		return scpErr
+	}
+
+	// 3. chmod it:
+	// can't chmod it using the SFTP client because it may not be the right user...
+	modeStrRepr := strconv.FormatUint(uint64(resource.TargetMode()), 8)
+	modeStrRepr = modeStrRepr[len(modeStrRepr)-3:]
+	// TODO: find out if one needs to chmod -R
+	runErrChmod := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chmod 0%s %s", modeStrRepr, bootstrapDir)))
+	if runErrChmod != nil {
+		dcc.logger.Warn("WARNING: chmod failed",
+			"resource", resource.TargetPath(),
+			"temp-destination", bootstrapDir,
+			"reason", runErrChmod)
+	}
+
+	// 4. chown it
+	if resource.TargetUser().Value != "" {
+		// can't chown using the SFTP client because it may not be the right user...
+		// TODO: find out if one needs to chown -R
+		runErrChown := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chown %s %s", resource.TargetUser().Value, bootstrapDir)))
+		if runErrChown != nil {
+			dcc.logger.Warn("WARNING: chown failed",
+				"resource", resource.TargetPath(),
+				"temp-destination", bootstrapDir,
+				"reason", runErrChown)
+		}
+	}
+
+	// 5. Move it to the final destination:
+	runErrMove := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && mv '%s/*' '%s'", destination, bootstrapDir, destination)))
+	if runErrMove != nil {
+		return runErrMove
+	}
+
+	// 6. Clean up
+	runErrCleanup := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("rm -r '%s' && ls -la '%s'", bootstrapDir, destination)))
+	if runErrCleanup != nil {
+		dcc.logger.Warn("WARNING: failed cleaning up the bootstrap directory",
+			"bootstrap-dir", bootstrapDir,
+			"reason", runErrCleanup)
+	}
+
+	dcc.logger.Debug("Resource moved to final destination",
+		"resource", resource.TargetPath(),
+		"temp-destination", bootstrapDir,
+		"final-destination", destination)
+
+	return nil
+}
+
+func (dcc *defaultConnectedClient) putFileResource(resource resources.ResolvedResource) error {
+
+	bootstrapDir := filepath.Join("/tmp", utils.RandStringBytes(32))
+	randomFileName := utils.RandStringBytes(32)
+	tempDestination := filepath.Join(bootstrapDir, randomFileName)
+
+	destination := filepath.Join(resource.TargetWorkdir().Value, resource.TargetPath())
+	destinationDirectory := filepath.Dir(destination)
+
+	// 1. Create a bootstrap directory:
+
+	runErrBootstrapDir := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && chown -R %s '%s'",
+		bootstrapDir,
+		dcc.connectedUser,
+		bootstrapDir)))
+	if runErrBootstrapDir != nil {
+		return runErrBootstrapDir
+	}
+
+	// 2. Put the file at the temporary destination:
+
+	f, err := dcc.sftpClient.Create(tempDestination)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	resourceReadCloser, err := resource.Contents()
+	if err != nil {
+		return err
+	}
+	defer resourceReadCloser.Close()
+
+	resourceBuf := make([]byte, defaultResourceReaderBufferSizeBytes)
+	for {
+		// read all contents of the resource:
+		read, err := resourceReadCloser.Read(resourceBuf)
+		if read == 0 && err == io.EOF {
+			break // all read
+		}
+		if err != nil {
+			return fmt.Errorf("error reading resource: %+v", err)
+		}
+		written, err := f.Write(resourceBuf[0:read])
+		if err != nil {
+			return err
+		}
+		if written != read {
+			return fmt.Errorf("write incomplete for '%s': written bytes: %d, chunk had: %d", resource.TargetPath(), written, read)
+		}
+	}
+
+	f.Close() // close immediately
+
+	dcc.logger.Debug("Resource uploaded to temporary destination", "resource", resource.TargetPath(), "temp-destination", tempDestination)
+
+	// 3. chmod it:
+	// can't chmod it using the SFTP client because it may not be the right user...
+	modeStrRepr := strconv.FormatUint(uint64(resource.TargetMode()), 8)
+	runErrChmod := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chmod 0%s %s", modeStrRepr, tempDestination)))
+	if runErrChmod != nil {
+		dcc.logger.Warn("WARNING: chmod failed",
 			"resource", resource.TargetPath(),
 			"temp-destination", tempDestination,
-			"final-destination", destination)
-
-		return nil
+			"reason", runErrChmod)
 	}
-	return fmt.Errorf("not implemented: directory put")
+
+	// 4. chown it
+	if resource.TargetUser().Value != "" {
+		// can't chown using the SFTP client because it may not be the right user...
+		runErrChown := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chown %s %s", resource.TargetUser().Value, tempDestination)))
+		if runErrChown != nil {
+			dcc.logger.Warn("WARNING: chown failed",
+				"resource", resource.TargetPath(),
+				"temp-destination", tempDestination,
+				"reason", runErrChown)
+		}
+	}
+
+	// 5. Move it to the final destination:
+
+	runErrMove := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && mv '%s' '%s'", destinationDirectory, tempDestination, destination)))
+	if runErrMove != nil {
+		return runErrMove
+	}
+
+	// 6. Clean up
+	runErrCleanup := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("rm -r '%s'", bootstrapDir)))
+	if runErrCleanup != nil {
+		dcc.logger.Warn("WARNING: failed cleaning up the bootstrap directory",
+			"bootstrap-dir", bootstrapDir,
+			"reason", runErrCleanup)
+	}
+
+	dcc.logger.Debug("Resource moved to final destination",
+		"resource", resource.TargetPath(),
+		"temp-destination", tempDestination,
+		"final-destination", destination)
+
+	return nil
 }
 
 func (dcc *defaultConnectedClient) WaitForEgress(ctx context.Context, target EgressTestTarget) error {
@@ -360,4 +486,8 @@ func (dcc *defaultConnectedClient) WaitForEgress(ctx context.Context, target Egr
 		return nil
 	}
 
+}
+
+func fileModeToString(mode fs.FileMode) string {
+	return strconv.FormatUint(uint64(mode), 8)
 }

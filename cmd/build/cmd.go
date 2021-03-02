@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/appministry/firebuild/build"
 	"github.com/appministry/firebuild/build/commands"
 	"github.com/appministry/firebuild/build/reader"
+	"github.com/appministry/firebuild/build/resources"
 	"github.com/appministry/firebuild/build/stage"
 	"github.com/appministry/firebuild/build/utils"
 	"github.com/appministry/firebuild/configs"
@@ -141,7 +141,6 @@ func initFlags() {
 }
 
 func init() {
-	rand.Seed(time.Now().UTC().UnixNano())
 	initFlags()
 }
 
@@ -173,6 +172,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		rootLogger.Error("failed parsing Dockerfile", "reason", err)
 		os.Exit(1)
 	}
+
 	scs, errs := stage.ReadStages(rawCommands)
 	for _, err := range errs {
 		rootLogger.Warn("stages read contained an error", "reason", err)
@@ -210,6 +210,48 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	// TODO: check that it exists and is regular file
 	sourceRootfs := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), "root.ext4")
 	buildRootfs := filepath.Join(tempDirectory, "rootfs")
+
+	// which resources from dependencies do we need:
+	requiredCopies := []commands.Copy{}
+	for _, stage := range scs.All() {
+		for _, stageCommand := range stage.Commands() {
+			switch tcommand := stageCommand.(type) {
+			case commands.Copy:
+				if tcommand.Stage != "" {
+					requiredCopies = append(requiredCopies, tcommand)
+				}
+			}
+		}
+	}
+
+	// resolve dependencies:
+	dependencyResources := map[string][]resources.ResolvedResource{}
+	for _, stage := range scs.All() {
+		for _, dependency := range stage.DependsOn() {
+			if _, ok := dependencyResources[dependency]; !ok {
+				dependencyStage := scs.NamedStage(dependency)
+				if dependencyStage == nil {
+					rootLogger.Error("main build stage depends on non-existent stage", "dependency", dependency)
+					cleanup.exec() // manually - defers don't run on os.Exit
+					os.Exit(1)
+				}
+				dependencyBuilder, builderError := build.NewDefaultDependencyBuild(dependencyStage, tempDirectory, filepath.Join(tempDirectory, "sources"))
+				if builderError != nil {
+					rootLogger.Error("failed constructing dependency builder", "stage", stage.Name(), "dependency", dependency, "reason", builderError)
+					cleanup.exec() // manually - defers don't run on os.Exit
+					os.Exit(1)
+				}
+				resolvedResources, buildError := dependencyBuilder.Build(requiredCopies)
+				if buildError != nil {
+					rootLogger.Error("failed building stage dependency", "stage", stage.Name(), "dependency", dependency, "reason", buildError)
+					dependencyBuilder.Cleanup()
+					cleanup.exec() // manually - defers don't run on os.Exit
+					os.Exit(1)
+				}
+				dependencyResources[dependency] = resolvedResources
+			}
+		}
+	}
 
 	vmmID := strings.ReplaceAll(uuid.Must(uuid.NewV4()).String(), "-", "")
 
@@ -352,6 +394,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		WithServiceInstaller(commandConfig.ServiceFileInstaller).
 		WithPostBuildCommands(postBuildCommands...).
 		WithPreBuildCommands(preBuildCommands...).
+		WithDependencyResources(dependencyResources).
 		Build(remoteClient); err != nil {
 		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
 		vmmLogger.Error("Failed boostrapping remote via SSH", "reason", buildErr)

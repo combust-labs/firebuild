@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
@@ -26,6 +27,7 @@ type Build interface {
 	From() commands.From
 	Metadata() map[string]string
 	WithBuildArgs(map[string]string) Build
+	WithDependencyResources(map[string][]resources.ResolvedResource) Build
 	WithLogger(hclog.Logger) Build
 	WithPostBuildCommands(...commands.Run) Build
 	WithPreBuildCommands(...commands.Run) Build
@@ -34,23 +36,24 @@ type Build interface {
 }
 
 type defaultBuild struct {
-	buildArgs         map[string]string
-	buildEnv          env.BuildEnv
-	currentArgs       map[string]string
-	currentCmd        commands.Cmd
-	currentEntrypoint commands.Entrypoint
-	currentEnv        map[string]string
-	currentMetadata   map[string]string
-	currentShell      commands.Shell
-	currentUser       commands.User
-	currentWorkdir    commands.Workdir
-	exposedPorts      []string
-	from              commands.From
-	instructions      []interface{}
-	isDependencyBuild bool
-	logger            hclog.Logger
-	resolver          resources.Resolver
-	serviceInstaller  string
+	buildArgs          map[string]string
+	buildEnv           env.BuildEnv
+	currentArgs        map[string]string
+	currentCmd         commands.Cmd
+	currentEntrypoint  commands.Entrypoint
+	currentEnv         map[string]string
+	currentMetadata    map[string]string
+	currentShell       commands.Shell
+	currentUser        commands.User
+	currentWorkdir     commands.Workdir
+	dependentResources map[string][]resources.ResolvedResource
+	exposedPorts       []string
+	from               commands.From
+	instructions       []interface{}
+	isDependencyBuild  bool
+	logger             hclog.Logger
+	resolver           resources.Resolver
+	serviceInstaller   string
 
 	postBuildCommands []commands.Run
 	preBuildCommands  []commands.Run
@@ -103,6 +106,30 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 				b.logger.Error("resource ADD type required but not resolved", "source", tcommand.Source)
 			}
 		case commands.Copy:
+			// dependency resources exist for COPY commands only:
+			if tcommand.Stage != "" {
+				// we need to locate a dependency resource
+				dependencyResources, ok := b.dependentResources[tcommand.Stage]
+				if !ok {
+					b.logger.Error("PutResource COPY resource failed, no dependency resource stage", "source", tcommand.Source, "stage", tcommand.Stage)
+					return fmt.Errorf("no dependency stage %s", tcommand.Stage)
+				}
+				resourceWasProcessed := false
+				for _, dependencyResource := range dependencyResources {
+					if strings.HasPrefix(dependencyResource.SourcePath(), tcommand.Source) {
+						b.logger.Info("Putting COPY resource from dependency", "source", tcommand.Source, "stage", tcommand.Stage)
+						if err := remoteClient.PutResource(dependencyResource); err != nil {
+							b.logger.Error("PutResource COPY resource failed", "source", tcommand.Source, "stage", tcommand.Stage, "reason", err)
+							return err
+						}
+						resourceWasProcessed = true
+					}
+				}
+				if !resourceWasProcessed {
+					b.logger.Error("resource COPY type required from stage but not resolved", "source", tcommand.Source, "stage", tcommand.Stage)
+				}
+				continue
+			}
 			b.logger.Info("Putting COPY resource", "source", tcommand.Source)
 			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
 				for _, resourceItem := range resource {
@@ -153,9 +180,14 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 
 	b.logger.Info("Uploading the service environment file")
 
+	serviceEnvReader := func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader([]byte(strings.Join(serviceEnv, "\n") + "\n"))), nil
+	}
+
 	if err := remoteClient.PutResource(resources.
-		NewResolvedFileResource([]byte(strings.Join(serviceEnv, "\n")+"\n"),
+		NewResolvedFileResource(serviceEnvReader,
 			fs.FileMode(0644),
+			"",
 			filepath.Join(etcDirectory, "cmd.env"),
 			commands.DefaultWorkdir(),
 			commands.DefaultUser())); err != nil {
@@ -193,11 +225,16 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 
 		b.logger.Info("Uploading service installer file")
 
+		serviceInstallerReader := func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader([]byte(installerBytes))), nil
+		}
+
 		// upload the installer:
 		installerPath := filepath.Join(etcDirectory, "installer.sh")
 		if err := remoteClient.PutResource(resources.
-			NewResolvedFileResource([]byte(installerBytes),
+			NewResolvedFileResource(serviceInstallerReader,
 				fs.FileMode(0754),
+				"",
 				installerPath,
 				commands.DefaultWorkdir(),
 				commands.DefaultUser())); err != nil {
@@ -316,6 +353,11 @@ func (b *defaultBuild) AddInstructions(instructions ...interface{}) error {
 	}
 
 	return nil
+}
+
+func (b *defaultBuild) WithDependencyResources(input map[string][]resources.ResolvedResource) Build {
+	b.dependentResources = input
+	return b
 }
 
 func (b *defaultBuild) WithLogger(input hclog.Logger) Build {

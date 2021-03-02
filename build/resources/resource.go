@@ -1,7 +1,9 @@
 package resources
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"io/fs"
 	"io/ioutil"
 	"net/http"
@@ -14,10 +16,11 @@ import (
 
 // ResolvedResource contains the data and the metadata of the resolved resource.
 type ResolvedResource interface {
-	Bytes() []byte
+	Contents() (io.ReadCloser, error)
 	IsDir() bool
 	ResolvedURIOrPath() string
 
+	SourcePath() string
 	TargetMode() fs.FileMode
 	TargetPath() string
 	TargetWorkdir() commands.Workdir
@@ -25,18 +28,22 @@ type ResolvedResource interface {
 }
 
 type defaultResolvedResource struct {
-	data     []byte
-	isDir    bool
-	resolved string
-
-	targetMode    fs.FileMode
-	targetPath    string
-	targetWorkdir commands.Workdir
-	targetUser    commands.User
+	contentsReader func() (io.ReadCloser, error)
+	isDir          bool
+	resolved       string
+	targetMode     fs.FileMode
+	sourcePath     string
+	targetPath     string
+	targetWorkdir  commands.Workdir
+	targetUser     commands.User
 }
 
-func (drr *defaultResolvedResource) Bytes() []byte {
-	return drr.data
+//func (drr *defaultResolvedResource) Bytes() []byte {
+//	return drr.data
+//}
+
+func (drr *defaultResolvedResource) Contents() (io.ReadCloser, error) {
+	return drr.contentsReader()
 }
 
 func (drr *defaultResolvedResource) IsDir() bool {
@@ -47,6 +54,9 @@ func (drr *defaultResolvedResource) ResolvedURIOrPath() string {
 	return drr.resolved
 }
 
+func (drr *defaultResolvedResource) SourcePath() string {
+	return drr.sourcePath
+}
 func (drr *defaultResolvedResource) TargetMode() fs.FileMode {
 	return drr.targetMode
 }
@@ -111,19 +121,34 @@ func (dr *defaultResolver) resolveResources(originalSource, resourcePath, target
 		if !strings.HasPrefix(newPath, parent) {
 			return nil, fmt.Errorf("http resource failed: resolved '%s' not in the context of '%s'", newPath, parent)
 		}
-		// we have the temp file:
-		httpResponse, err := http.Get(newPath)
+		httpResponse, err := http.Head(newPath)
 		if err != nil {
 			return nil, err
 		}
 		defer httpResponse.Body.Close()
-		bodyBytes, err := ioutil.ReadAll(httpResponse.Body)
-		if err != nil {
-			return nil, fmt.Errorf("http resource failed: could not GET resource '%s', reason: %+v", newPath, err)
+		if httpResponse.StatusCode%100 != 2 {
+			return nil, fmt.Errorf("http resource failed: could not HEAD resource '%s', reason: %+v", newPath, err)
 		}
-		return append(resources, &defaultResolvedResource{data: bodyBytes,
+
+		httpContentSupplier := func() (io.ReadCloser, error) {
+			// we have the temp file:
+			httpResponse, err := http.Get(newPath)
+			if err != nil {
+				return nil, err
+			}
+			return httpResponse.Body, nil
+			/*
+				bodyBytes, err := ioutil.ReadAll(httpResponse.Body)
+				if err != nil {
+					return nil, fmt.Errorf("http resource failed: could not GET resource '%s', reason: %+v", newPath, err)
+				}
+			*/
+		}
+
+		return append(resources, &defaultResolvedResource{contentsReader: httpContentSupplier,
 			resolved:      newPath,
 			targetMode:    fs.FileMode(0644),
+			sourcePath:    resourcePath,
 			targetPath:    targetPath,
 			targetWorkdir: targetWorkdir,
 			targetUser:    targetUser}), nil
@@ -145,22 +170,28 @@ func (dr *defaultResolver) resolveResources(originalSource, resourcePath, target
 			return nil, fmt.Errorf("resource failed: resolved '%s', reason: %v", match, statErr)
 		}
 		if statResult.IsDir() {
-			resources = append(resources, &defaultResolvedResource{data: []byte{},
+			resources = append(resources, &defaultResolvedResource{contentsReader: func() (io.ReadCloser, error) {
+				return ioutil.NopCloser(bytes.NewReader([]byte{})), nil
+			},
 				isDir:         true,
 				resolved:      newPath,
-				targetMode:    statResult.Mode(),
+				sourcePath:    resourcePath,
+				targetMode:    statResult.Mode().Perm(),
 				targetPath:    targetPath,
 				targetWorkdir: targetWorkdir,
 				targetUser:    targetUser})
 		} else {
-			fileBytes, err := ioutil.ReadFile(newPath)
-			if err != nil {
-				return nil, fmt.Errorf("resource failed: could not read resource '%s', reason:  %+v", newPath, err)
-			}
-			resources = append(resources, &defaultResolvedResource{data: fileBytes,
+			resources = append(resources, &defaultResolvedResource{contentsReader: func() (io.ReadCloser, error) {
+				file, err := os.Open(newPath)
+				if err != nil {
+					return nil, fmt.Errorf("resource failed: could not read file resource '%s', reason:  %+v", newPath, err)
+				}
+				return file, nil
+			},
 				isDir:         false,
 				resolved:      newPath,
-				targetMode:    statResult.Mode(),
+				sourcePath:    resourcePath,
+				targetMode:    statResult.Mode().Perm(),
 				targetPath:    targetPath,
 				targetWorkdir: targetWorkdir,
 				targetUser:    targetUser})
@@ -171,11 +202,17 @@ func (dr *defaultResolver) resolveResources(originalSource, resourcePath, target
 }
 
 // NewResolvedFileResource creates a resolved resource from input information.
-func NewResolvedFileResource(data []byte, mode fs.FileMode, targetPath string, workdir commands.Workdir, user commands.User) ResolvedResource {
-	return &defaultResolvedResource{data: data,
+func NewResolvedFileResource(contentsReader func() (io.ReadCloser, error), mode fs.FileMode, sourcePath, targetPath string, workdir commands.Workdir, user commands.User) ResolvedResource {
+	return NewResolvedFileResourceWithPath(contentsReader, mode, sourcePath, targetPath, workdir, user, "")
+}
+
+// NewResolvedFileResourceWithPath creates a resolved resource from input information containing resource source path.
+func NewResolvedFileResourceWithPath(contentsReader func() (io.ReadCloser, error), mode fs.FileMode, sourcePath, targetPath string, workdir commands.Workdir, user commands.User, path string) ResolvedResource {
+	return &defaultResolvedResource{contentsReader: contentsReader,
 		isDir:         false,
-		resolved:      "",
+		resolved:      path,
 		targetMode:    mode,
+		sourcePath:    sourcePath,
 		targetPath:    targetPath,
 		targetWorkdir: workdir,
 		targetUser:    user}

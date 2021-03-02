@@ -5,8 +5,13 @@ import (
 	"strings"
 )
 
+type DockerfileSerializable interface {
+	GetOriginal() string
+}
+
 // Add represents the ADD instruction.
 type Add struct {
+	OriginalCommand    string
 	OriginalSource     string
 	Source             string
 	Target             string
@@ -15,10 +20,19 @@ type Add struct {
 	UserFromLocalChown *User
 }
 
+func (cmd Add) GetOriginal() string {
+	return cmd.OriginalCommand
+}
+
 // Arg represents the ARG instruction.
 type Arg struct {
-	k, v string
-	hadv bool
+	OriginalCommand string
+	k, v            string
+	hadv            bool
+}
+
+func (cmd Arg) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // NewRawArg returns a new parsed ARG from the raw input.
@@ -41,22 +55,28 @@ func NewRawArg(input string) (Arg, error) {
 }
 
 // Key returns the ARG key.
-func (a Arg) Key() string {
-	return a.k
+func (cmd Arg) Key() string {
+	return cmd.k
 }
 
 // Value returns the ARG value and  a boolean indicating if value was defined in the Dockerfile.
-func (a Arg) Value() (string, bool) {
-	return a.v, a.hadv
+func (cmd Arg) Value() (string, bool) {
+	return cmd.v, cmd.hadv
 }
 
 // Cmd represents the CMD instruction.
 type Cmd struct {
-	Values []string
+	OriginalCommand string
+	Values          []string
+}
+
+func (cmd Cmd) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // Copy represents the COPY instruction.
 type Copy struct {
+	OriginalCommand    string
 	OriginalSource     string
 	Source             string
 	Stage              string
@@ -66,24 +86,43 @@ type Copy struct {
 	UserFromLocalChown *User
 }
 
+func (cmd Copy) GetOriginal() string {
+	return cmd.OriginalCommand
+}
+
 // Entrypoint represents the ENTRYPOINT instruction.
 type Entrypoint struct {
-	Values  []string
-	Env     map[string]string
-	Shell   Shell
-	Workdir Workdir
-	User    User
+	OriginalCommand string
+	Values          []string
+	Env             map[string]string
+	Shell           Shell
+	Workdir         Workdir
+	User            User
+}
+
+func (cmd Entrypoint) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // Env represents the ENV instruction.
 type Env struct {
-	Name  string
-	Value string
+	OriginalCommand string
+	Name            string
+	Value           string
+}
+
+func (cmd Env) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // Expose represents the EXPOSE instruction.
 type Expose struct {
-	RawValue string
+	OriginalCommand string
+	RawValue        string
+}
+
+func (cmd Expose) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // StructuredFrom decomposes the base in=mage of From into the org, os and version parts.
@@ -110,16 +149,21 @@ func (sf *StructuredFrom) Version() string {
 
 // From represents the FROM instruction.
 type From struct {
-	BaseImage string
-	StageName string
+	OriginalCommand string
+	BaseImage       string
+	StageName       string
+}
+
+func (cmd From) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // ToStructuredFrom extracts structured info from the base image string.
-func (f From) ToStructuredFrom() *StructuredFrom {
+func (cmd From) ToStructuredFrom() *StructuredFrom {
 	structuredForm := &StructuredFrom{org: "_"}
-	imageName := f.BaseImage
-	if strings.Contains(f.BaseImage, "/") {
-		structuredForm.org = strings.Split(f.BaseImage, "/")[0]
+	imageName := cmd.BaseImage
+	if strings.Contains(cmd.BaseImage, "/") {
+		structuredForm.org = strings.Split(cmd.BaseImage, "/")[0]
 		imageName = strings.TrimPrefix(imageName, structuredForm.org+"/")
 	}
 	osAndVersion := strings.Split(imageName, ":")
@@ -130,40 +174,66 @@ func (f From) ToStructuredFrom() *StructuredFrom {
 
 // Label represents the LABEL instruction.
 type Label struct {
-	Key   string
-	Value string
+	OriginalCommand string
+	Key             string
+	Value           string
+}
+
+func (cmd Label) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // Run represents the RUN instruction.
 type Run struct {
-	Args    map[string]string
-	Command string
-	Env     map[string]string
-	Shell   Shell
-	Workdir Workdir
-	User    User
+	OriginalCommand string
+	Args            map[string]string
+	Command         string
+	Env             map[string]string
+	Shell           Shell
+	Workdir         Workdir
+	User            User
+}
+
+func (cmd Run) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // Shell represents the SHELL instruction.
 type Shell struct {
-	Commands []string
+	OriginalCommand string
+	Commands        []string
+}
+
+func (cmd Shell) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // User represents the USER instruction.
 type User struct {
-	Value string
+	OriginalCommand string
+	Value           string
+}
+
+func (cmd User) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // Volume represents the VOLUME instruction.
 type Volume struct {
-	Workdir Workdir
-	User    User
-	Values  []string
+	OriginalCommand string
+	Workdir         Workdir
+	User            User
+	Values          []string
 }
 
 // Workdir represents the WORKDIR instruction.
 type Workdir struct {
-	Value string
+	OriginalCommand string
+	Value           string
+}
+
+func (cmd Workdir) GetOriginal() string {
+	return cmd.OriginalCommand
 }
 
 // DefaultShell returns the default shell.

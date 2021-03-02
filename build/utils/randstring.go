@@ -1,8 +1,15 @@
 package utils
 
-import "math/rand"
+import (
+	"math/rand"
+	"time"
+)
 
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+func init() {
+	rand.Seed(time.Now().UTC().UnixNano())
+}
 
 // RandStringBytes returns a random string of length n.
 func RandStringBytes(n int) string {

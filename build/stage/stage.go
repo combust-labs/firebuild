@@ -9,16 +9,33 @@ import (
 func ReadStages(inputs []interface{}) (Stages, []error) {
 	stages := newStages()
 	errs := []error{}
+
+	danglingCommands := []interface{}{}
+
 	for _, input := range inputs {
 		switch input.(type) {
 		case commands.From:
 			// a FROM command resets the processing stage
 			stages.closePrevious()
 			stages.setCurrent(newEmptyStage())
+			for _, danglingCommand := range danglingCommands {
+				stages.addCommand(danglingCommand)
+			}
 			stages.addCommand(input)
 		default:
 			if !stages.addCommand(input) {
-				errs = append(errs, &bcErrors.CommandOutOfScopeError{Command: input})
+				// if there is an ARG, ENV or LABEL prior to any FROM,
+				// remember it and add these to any further stage first
+				switch input.(type) {
+				case commands.Arg:
+					danglingCommands = append(danglingCommands, input)
+				case commands.Env:
+					danglingCommands = append(danglingCommands, input)
+				case commands.Label:
+					danglingCommands = append(danglingCommands, input)
+				default:
+					errs = append(errs, &bcErrors.CommandOutOfScopeError{Command: input})
+				}
 			}
 		}
 	}

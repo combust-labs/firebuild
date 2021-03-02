@@ -15,9 +15,9 @@ This process assumes that you have:
 ./baseos/_/alpine/${version}/build.sh
 ```
 
-## Create a dedicated CNI network for the builds:
+## Create a dedicated CNI network for the builds
 
-Feel free to change the `ipam.subnet` of set multiple ones. `host-local` IPAM [CNI plugin documentation](https://www.cni.dev/plugins/ipam/host-local/).
+Feel free to change the `ipam.subnet` or set multiple ones. `host-local` IPAM [CNI plugin documentation](https://www.cni.dev/plugins/ipam/host-local/).
 
 ```sh
 cat <<EOF > /firecracker/cni/conf.d/machine-builds.conflist
@@ -49,9 +49,9 @@ cat <<EOF > /firecracker/cni/conf.d/machine-builds.conflist
 EOF
 ```
 
-## An example:
+## An example
 
-This will fail because the Dockerfile uses the ADD command. To succeed, clone the owning repository locally and reference the local file.
+This will fail because the Dockerfile uses the `ADD` command. To succeed, clone the owning repository locally and reference the local file. Eventually, use the `git+http(s)://` URL scheme.
 
 This example assumes that SSH agent is started and the relevant version SSH key is in the agent.
 
@@ -101,7 +101,7 @@ And will be processed as:
 
 - path `/path/to/repo.git:/path/to/Dockerfile` will be split by `:` and must contain both sides
   - `/path/to/repo.git` is the git repository path
-  - `/path/to/Dockerfile` is the path to the `Dockerfile` in the repository and after clone an checkout must point to a file
+  - `/path/to/Dockerfile` is the path to the `Dockerfile` in the repository, must point to a file after clone and checkout
 - optional `#fragment` may be a comit hash, a branch name or a tag name
   - if no `#fragment` is given, the program will use the default cloned branch, check the remote to find out what is it
 - the cloned repository will have a single remote and the first remote wil be used
@@ -123,7 +123,7 @@ Git repositories support file modes and the files from the `ADD` and `COPY` dire
 
 ## Caveats when building from the URL
 
-The `build` command will resolve the resources refernced in `ADD` and `COPY` commands even when loading the `Dockerfile` via the URL. The context root in this case will be established by removing the file name from the URL. An example:
+The `build` command will resolve the resources referenced in `ADD` and `COPY` commands even when loading the `Dockerfile` via the URL. The context root in this case will be established by removing the file name from the URL. An example:
 
 - consider the URL `https://raw.githubusercontent.com/hashicorp/docker-consul/master/0.X/Dockerfile`
 - the `Dockerfile` name will be removed from the URL and the context is `https://raw.githubusercontent.com/hashicorp/docker-consul/master/0.X`
@@ -142,3 +142,24 @@ The build program does not support:
 - `HEALTHCHECK` commands
 - `STOPSIGNAL` commands
 
+## Multi-stage Dockerfile builds
+
+The program intends to support multi-stage `Dockerfile` builds. An example with [grepplabs Kafka Proxy](https://github.com/grepplabs/kafka-proxy).
+
+Build v0.2.8 using git repository link, leave SSH access on:
+
+```sh
+/usr/local/go/bin/go run ./main.go build \
+    --binary-firecracker=$(readlink /usr/bin/firecracker) \
+    --binary-jailer=$(readlink /usr/bin/jailer) \
+    --chroot-base=/srv/jailer \
+    --dockerfile=git+https://github.com/grepplabs/kafka-proxy.git:/Dockerfile#v0.2.8 \
+    --machine-cni-network-name=machine-builds \
+    --machine-rootfs-base=/firecracker/rootfs \
+    --machine-ssh-user=alpine \
+    --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
+    --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
+    --log-as-json \
+    --tag=tests/kafka-proxy:0.2.8 \
+    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
+```
