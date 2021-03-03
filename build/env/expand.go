@@ -1,3 +1,13 @@
+// This code comes from golang standard library:
+// https://github.com/golang/go/blob/0e85fd7561de869add933801c531bf25dee9561c/src/os/env.go#L16-L96
+// This file is explicitly excluded from the top repository license.
+
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// General environment variables.
+
 package env
 
 import "fmt"

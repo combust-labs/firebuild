@@ -169,3 +169,12 @@ Build v0.2.8 using git repository link, leave SSH access on:
     --tag=tests/kafka-proxy:0.2.8 \
     --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
 ```
+
+## License
+
+Unless explcitly stated: AGPL-3.0 License.
+
+Excluded from the license:
+
+- `build/env/expand.go`: sourced from golang standard library
+- `remote/scp.go`: sourced from Terraform SSH communicator

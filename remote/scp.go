@@ -1,3 +1,7 @@
+// This code comes from Terraform SSH communicator:
+// https://github.com/hashicorp/terraform/blob/f172585eaa23b9edc40c5b73b066654e1bae7120/communicator/ssh/communicator.go#L514
+// This file is explicitly excluded from the top repository license.
+
 package remote
 
 import (
@@ -14,9 +18,6 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"golang.org/x/crypto/ssh"
 )
-
-// This code comes from Terraform SSH communicator:
-// https://github.com/hashicorp/terraform/blob/f172585eaa23b9edc40c5b73b066654e1bae7120/communicator/ssh/communicator.go#L514
 
 func (dcc *defaultConnectedClient) scpSession(scpCommand string, f func(io.Writer, *bufio.Reader) error) error {
 
