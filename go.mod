@@ -1,4 +1,4 @@
-module github.com/appministry/firebuild
+module github.com/combust-labs/firebuild
 
 go 1.16
 

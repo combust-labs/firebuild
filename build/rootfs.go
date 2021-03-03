@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/appministry/firebuild/build/commands"
-	"github.com/appministry/firebuild/build/env"
-	"github.com/appministry/firebuild/build/resources"
-	"github.com/appministry/firebuild/remote"
+	"github.com/combust-labs/firebuild/build/commands"
+	"github.com/combust-labs/firebuild/build/env"
+	"github.com/combust-labs/firebuild/build/resources"
+	"github.com/combust-labs/firebuild/remote"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"
 )

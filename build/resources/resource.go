@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/appministry/firebuild/build/commands"
+	"github.com/combust-labs/firebuild/build/commands"
 )
 
 // ResolvedResource contains the data and the metadata of the resolved resource.

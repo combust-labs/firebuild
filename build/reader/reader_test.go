@@ -3,7 +3,7 @@ package reader
 import (
 	"testing"
 
-	"github.com/appministry/firebuild/build/commands"
+	"github.com/combust-labs/firebuild/build/commands"
 )
 
 func TestReadAddChownFromBytes(t *testing.T) {

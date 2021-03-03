@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/appministry/firebuild/cmd/build"
+	"github.com/combust-labs/firebuild/cmd/build"
 	"github.com/spf13/cobra"
 )
 

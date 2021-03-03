@@ -1,8 +1,8 @@
 package stage
 
 import (
-	"github.com/appministry/firebuild/build/commands"
-	bcErrors "github.com/appministry/firebuild/build/errors"
+	"github.com/combust-labs/firebuild/build/commands"
+	bcErrors "github.com/combust-labs/firebuild/build/errors"
 )
 
 // ReadStages reads the stages out of the source commands.

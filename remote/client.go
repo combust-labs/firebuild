@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/appministry/firebuild/build/commands"
-	"github.com/appministry/firebuild/build/resources"
-	"github.com/appministry/firebuild/build/utils"
+	"github.com/combust-labs/firebuild/build/commands"
+	"github.com/combust-labs/firebuild/build/resources"
+	"github.com/combust-labs/firebuild/build/utils"
 	"github.com/hashicorp/go-hclog"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
