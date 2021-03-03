@@ -121,6 +121,12 @@ Git repositories support file modes and the files from the `ADD` and `COPY` dire
 }
 ```
 
+## Supported URL formats
+
+- `http://` and `https://` for direct paths to the `Dockerfile`, these can handle single file only and do not attempt loading any resources handled by `ADD` / `COPY` commands, the server must be capable of responding to `HEAD` and `GET` http requests, more details in `Caveats when building from the URL` further in this document
+- special `git+http://` and `git+https://`, documented above
+- standard `ssh://`, `git://` and `git+ssh://` URL formats with the expectation that the path meets the criteria from the `git+http(s):// URL` section above
+
 ## Caveats when building from the URL
 
 The `build` command will resolve the resources referenced in `ADD` and `COPY` commands even when loading the `Dockerfile` via the URL. The context root in this case will be established by removing the file name from the URL. An example:

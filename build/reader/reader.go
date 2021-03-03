@@ -48,13 +48,19 @@ func (dr *defaultReadResult) ExcludePatterns() []string {
 // ReadFromString reads commands from string.
 //
 // - literal Dockerfile content, ADD and COPY will not work
-// - http:// or httpL// URL
-// - git+http:// and git+https:// URL
+// - http:// or http:// URL
+// - SPECIAL: git+http:// and git+https:// URL
 //   the format is: git+http(s)://host:port/path/to/repo.git:/path/to/Dockerfile[#<commit-hash | branch-name | tag-name>]
+// - ssh://, git:// or git+ssh:// URL
 // - absolute path to the local file
 func ReadFromString(input string, tempDirectory string) (ReadResult, error) {
 
-	if strings.HasPrefix(input, "git+http://") || strings.HasPrefix(input, "git+https://") {
+	if strings.HasPrefix(input, "git+http://") ||
+		strings.HasPrefix(input, "git+https://") ||
+		strings.HasPrefix(input, "git+ssh://") ||
+		strings.HasPrefix(input, "git://") ||
+		strings.HasPrefix(input, "ssh://") {
+
 		u, _ := url.Parse(input)
 
 		branchToCheckout := u.Fragment
@@ -67,7 +73,11 @@ func ReadFromString(input string, tempDirectory string) (ReadResult, error) {
 		u.Path = pathParts[0]
 		u.Fragment = ""
 
-		repoURL := strings.Replace(strings.Replace(u.String(), "git+http://", "http://", 1), "git+https://", "https://", 1)
+		// just in case, for git+http(s), fix the scheme by removing git+
+		repoURL := u.String()
+		if strings.HasPrefix(repoURL, "git+http://") || strings.HasPrefix(repoURL, "git+https://") {
+			repoURL = repoURL[4:]
+		}
 
 		repoDestDir := filepath.Join(tempDirectory, "sources")
 		repo, err := git.PlainClone(repoDestDir, false, &git.CloneOptions{
