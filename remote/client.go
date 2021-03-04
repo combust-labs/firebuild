@@ -17,6 +17,7 @@ import (
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/resources"
 	"github.com/combust-labs/firebuild/build/utils"
+
 	"github.com/hashicorp/go-hclog"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -215,13 +216,13 @@ func (dcc *defaultConnectedClient) RunCommand(command commands.Run) error {
 	// so we can't, for example, assume bourne shell -a...
 	envString := ""
 	for k, v := range command.Env {
-		envString = fmt.Sprintf("%s%s='%s' ", envString, k, strings.ReplaceAll(v, "'", "''"))
+		envString = fmt.Sprintf("%s%s=\"%s\"; ", envString, k, v)
 	}
 
 	remoteCommand := fmt.Sprintf("sudo mkdir -p %s && sudo %s '%s'\n",
 		command.Workdir.Value,
 		strings.Join(command.Shell.Commands, " "),
-		strings.ReplaceAll(envString+command.Command, "'", "''"))
+		strings.ReplaceAll(envString+command.Command, "'", "'\\''"))
 
 	dcc.logger.Debug("Running remote command", "command", remoteCommand, "env", command.Env)
 
