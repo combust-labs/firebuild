@@ -183,7 +183,7 @@ Excluded from the license:
 
 ### Postgres 13 with Debian Buster slim
 
-```
+```sh
 /usr/local/go/bin/go run ./main.go build \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
@@ -196,5 +196,24 @@ Excluded from the license:
     --pre-build-command='chmod 1777 /tmp' \
     --log-as-json \
     --resources-mem=512 \
-    --tag=tests/postgres:13
+    --tag=tests/postgres:13 \
+    --service-file-installer=$(pwd)/baseos/_/debian/sysvinit.service.sh
 ```
+
+Once the root file system is built, start the VMM:
+
+```sh
+sudo $GOPATH/bin/firectl \
+    --jailer=/usr/bin/jailer \
+    --exec-file=$(readlink /usr/bin/firecracker) \
+    --id=postgres1 \
+    --chroot-base-dir=/srv/jailer \
+    --kernel=/firecracker/vmlinux/vmlinux-v5.8 \
+    --root-drive=/firecracker/rootfs/_builds/tests/postgres/13/rootfs \
+    --cni-network=${CNI_NETWORK_NAME} \
+    --veth-iface-name=postgres1 \
+    --ncpus=1 \
+    --memory=256
+```
+
+This service will not start automatically because the Postgres server requires an additional `export POSTGRES_PASSWORD=...` environment variable in the `/etc/firebuild/cmd.env` file. Right now, one needs to SSH to the VMM, `sudo echo 'export POSTGRES_PASSWORD' >> /etc/firebuild/cmd.env` and `sudo service DockerEntrypoint.sh start` to start the database.
