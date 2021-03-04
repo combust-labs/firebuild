@@ -1,11 +1,12 @@
 #!/bin/sh
 # This program will be executed with sudo.
-# The command to execute is written to an /etc/firebuild/cmd.env file.
+# The command environment is written to /etc/firebuild/cmd.env.
 
 cat << 'EOF' > /etc/local.d/DockerEntrypoint.start
 mkdir -p /var/log
 . /etc/firebuild/cmd.env
-nohup /bin/sh -c "cd ${SERVICE_WORKDIR} && ${SERVICE_ENTRYPOINT} ${SERVICE_CMDS} &>/var/log/consul.log" &
+SNAME=DockerEntrypoint
+nohup /bin/sh -c ". /etc/firebuild/cmd.env && cd ${SERVICE_WORKDIR} && ${SERVICE_ENTRYPOINT} ${SERVICE_CMDS} > /var/log/${SNAME}.log 2>&1" &>/var/log/${SNAME}-nohup.log
 EOF
 
 cat << 'EOF' > /etc/local.d/DockerEntrypoint.stop

@@ -36,7 +36,11 @@ func expand(s string, mapping func(string) (string, bool)) string {
 				if ok {
 					buf = append(buf, replacement...)
 				} else {
-					buf = append(buf, fmt.Sprintf("${%s}", name)...) // just restore the value
+					// just restore the value BUT:
+					// do not surround the name with {}, if there is a non-shell variable,
+					// for example: awk '{ print $NR }'
+					// surrounding with {} will break it...
+					buf = append(buf, fmt.Sprintf("$%s", name)...)
 				}
 			}
 			j += w

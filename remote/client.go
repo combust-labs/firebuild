@@ -17,6 +17,7 @@ import (
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/resources"
 	"github.com/combust-labs/firebuild/build/utils"
+
 	"github.com/hashicorp/go-hclog"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -215,13 +216,13 @@ func (dcc *defaultConnectedClient) RunCommand(command commands.Run) error {
 	// so we can't, for example, assume bourne shell -a...
 	envString := ""
 	for k, v := range command.Env {
-		envString = fmt.Sprintf("%s%s='%s' ", envString, k, strings.ReplaceAll(v, "'", "''"))
+		envString = fmt.Sprintf("%s%s=\"%s\"; ", envString, k, v)
 	}
 
 	remoteCommand := fmt.Sprintf("sudo mkdir -p %s && sudo %s '%s'\n",
 		command.Workdir.Value,
 		strings.Join(command.Shell.Commands, " "),
-		strings.ReplaceAll(envString+command.Command, "'", "''"))
+		strings.ReplaceAll(envString+command.Command, "'", "'\\''"))
 
 	dcc.logger.Debug("Running remote command", "command", remoteCommand, "env", command.Env)
 
@@ -355,6 +356,11 @@ func (dcc *defaultConnectedClient) putFileResource(resource resources.ResolvedRe
 	tempDestination := filepath.Join(bootstrapDir, randomFileName)
 
 	destination := filepath.Join(resource.TargetWorkdir().Value, resource.TargetPath())
+	targetFileName := filepath.Base(resource.SourcePath())
+	if filepath.Base(destination) != targetFileName {
+		// ensure that we always have a full target path:
+		destination = filepath.Join(destination, targetFileName)
+	}
 	destinationDirectory := filepath.Dir(destination)
 
 	// 1. Create a bootstrap directory:
@@ -407,7 +413,7 @@ func (dcc *defaultConnectedClient) putFileResource(resource resources.ResolvedRe
 	// 3. chmod it:
 	// can't chmod it using the SFTP client because it may not be the right user...
 	modeStrRepr := strconv.FormatUint(uint64(resource.TargetMode()), 8)
-	runErrChmod := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chmod 0%s %s", modeStrRepr, tempDestination)))
+	runErrChmod := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chmod 0%s \"%s\"", modeStrRepr, tempDestination)))
 	if runErrChmod != nil {
 		dcc.logger.Warn("WARNING: chmod failed",
 			"resource", resource.TargetPath(),
@@ -418,7 +424,7 @@ func (dcc *defaultConnectedClient) putFileResource(resource resources.ResolvedRe
 	// 4. chown it
 	if resource.TargetUser().Value != "" {
 		// can't chown using the SFTP client because it may not be the right user...
-		runErrChown := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chown %s %s", resource.TargetUser().Value, tempDestination)))
+		runErrChown := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("chown %s \"%s\"", resource.TargetUser().Value, tempDestination)))
 		if runErrChown != nil {
 			dcc.logger.Warn("WARNING: chown failed",
 				"resource", resource.TargetPath(),
@@ -429,13 +435,13 @@ func (dcc *defaultConnectedClient) putFileResource(resource resources.ResolvedRe
 
 	// 5. Move it to the final destination:
 
-	runErrMove := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && mv '%s' '%s'", destinationDirectory, tempDestination, destination)))
+	runErrMove := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s' && mv \"%s\" \"%s\"", destinationDirectory, tempDestination, destination)))
 	if runErrMove != nil {
 		return runErrMove
 	}
 
 	// 6. Clean up
-	runErrCleanup := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("rm -r '%s'", bootstrapDir)))
+	runErrCleanup := dcc.RunCommand(commands.RunWithDefaults(fmt.Sprintf("rm -r \"%s\"", bootstrapDir)))
 	if runErrCleanup != nil {
 		dcc.logger.Warn("WARNING: failed cleaning up the bootstrap directory",
 			"bootstrap-dir", bootstrapDir,
