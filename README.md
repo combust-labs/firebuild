@@ -178,3 +178,23 @@ Excluded from the license:
 
 - `build/env/expand.go`: sourced from golang standard library
 - `remote/scp.go`: sourced from Terraform SSH communicator
+
+## Other examples
+
+### Postgres 13 with Debian Buster slim
+
+```
+/usr/local/go/bin/go run ./main.go build \
+    --binary-firecracker=$(readlink /usr/bin/firecracker) \
+    --binary-jailer=$(readlink /usr/bin/jailer) \
+    --chroot-base=/srv/jailer \
+    --dockerfile=git+https://github.com/docker-library/postgres.git:/13/Dockerfile \
+    --machine-cni-network-name=machine-builds \
+    --machine-rootfs-base=/firecracker/rootfs \
+    --machine-ssh-user=debian \
+    --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
+    --pre-build-command='chmod 1777 /tmp' \
+    --log-as-json \
+    --resources-mem=512 \
+    --tag=tests/postgres:13
+```
