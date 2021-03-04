@@ -203,6 +203,11 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 		fmt.Sprintf("SERVICE_USER=\"%s\"", b.currentEntrypoint.User.Value),
 	}
 
+	// put gathered environment in the env file:
+	for k, v := range b.currentEnv {
+		serviceEnv = append(serviceEnv, fmt.Sprintf("export %s=\"%s\"", k, v))
+	}
+
 	b.logger.Info("Creating bootstrap data location", "location", etcDirectory)
 
 	if err := remoteClient.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s'", etcDirectory))); err != nil {
