@@ -2,7 +2,6 @@ package utils
 
 import (
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -46,13 +45,8 @@ func Mount(file, dir string) error {
 }
 
 // MoveFile moves file from one location to another
-// and create intermediate directories.
-// If the target file already exists, it will be truncated to size 0 first.
+// and create intermediate target directories.
 func MoveFile(source, target string) error {
-
-	// TODO: implement a backup mechanism
-
-	success := false
 
 	sourceStat, err := os.Stat(source)
 	if err != nil {
@@ -65,64 +59,9 @@ func MoveFile(source, target string) error {
 		return err
 	}
 
-	// open writable file:
-	writableFile, err := os.OpenFile(target, os.O_RDWR, 0664)
-	if err != nil {
-		return err
+	if err := os.Rename(source, target); err != nil {
+		return fmt.Errorf("move failed, reason: %+v", err)
 	}
-	defer func() {
-		if err := writableFile.Close(); err != nil {
-			fmt.Printf("failed closing writable file, reason: %+v", err)
-		}
-		if !success {
-			// write failed, remove the file...
-			if err := os.Remove(target); err != nil {
-				fmt.Printf("failed removing target file on unsuccessful move, trash left, reason: %+v", err)
-			}
-		}
-	}()
-
-	if err := writableFile.Truncate(0); err != nil {
-		return err
-	}
-
-	// open readable file:
-	readableFile, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := readableFile.Close(); err != nil {
-			fmt.Printf("failed closing readable file, reason: %+v", err)
-		}
-		if success {
-			// write failed, remove the file...
-			if err := os.Remove(source); err != nil {
-				fmt.Printf("failed removing source file on successful move, trash left, reason: %+v", err)
-			}
-		}
-	}()
-
-	// rewrite the file:
-	buf := make([]byte, 8*1024*1024)
-	for {
-		read, err := readableFile.Read(buf)
-		if read == 0 && err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("error reading source file, reason: %+v", err)
-		}
-		written, err := writableFile.Write(buf[0:read])
-		if err != nil {
-			return fmt.Errorf("error writing target file, reason: %+v", err)
-		}
-		if written != read {
-			fmt.Println(fmt.Sprintf("warning, written '%d' vs read '%d' did not match", written, read))
-		}
-	}
-
-	success = true
 
 	return nil
 }

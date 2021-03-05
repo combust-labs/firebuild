@@ -46,13 +46,17 @@ sudo /usr/local/go/bin/go run ./main.go baseos \
     --machine-rootfs-base=/firecracker/rootfs
 ```
 
-### How is the base operating file system built
+### Why
 
-TODO
+TODO: explain why is the base operating system rootfs required.
 
-### Target directory
+### How
 
-TODO
+TODO: describe the process.
+
+#### Target directory
+
+TODO: describe how is the final directory path contructed.
 
 ## Build an application VMM from a Dockerfile
 
