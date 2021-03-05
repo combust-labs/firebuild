@@ -2,19 +2,6 @@
 
 Work in progress.
 
-## Build a base OS root file system
-
-This process assumes that you have:
-
-- a writable directory `/firecracker`
-- a writable directory `$HOME/.ssh`
-- `docker` without the need for `sudo`
-- the user which executes the `build.sh` must be a `sudoer`
-
-```sh
-./baseos/_/alpine/${version}/build.sh
-```
-
 ## Create a dedicated CNI network for the builds
 
 Feel free to change the `ipam.subnet` or set multiple ones. `host-local` IPAM [CNI plugin documentation](https://www.cni.dev/plugins/ipam/host-local/).
