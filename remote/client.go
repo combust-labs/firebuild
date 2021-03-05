@@ -3,10 +3,10 @@ package remote
 import (
 	"bufio"
 	"context"
+	"crypto/rsa"
 	"fmt"
 	"io"
 	"io/fs"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -35,13 +35,13 @@ const (
 
 // ConnectConfig contains the data to connect to the remote
 type ConnectConfig struct {
-	SSKKeyFile          string
-	SSHUsername         string
-	IP                  net.IP
-	Port                int
-	DisableAgentForward bool
-	MaxPacketSize       int
-	TimeoutSeconds      int
+	SSHPrivateKey      rsa.PrivateKey
+	SSHUsername        string
+	IP                 net.IP
+	Port               int
+	EnableAgentForward bool
+	MaxPacketSize      int
+	TimeoutSeconds     int
 }
 
 // Connect connects to the SSH location location and returns a connected client.
@@ -52,20 +52,13 @@ func Connect(ctx context.Context, cfg ConnectConfig, logger hclog.Logger) (Conne
 	hostPort := fmt.Sprintf("%s:%d", cfg.IP.String(), cfg.Port)
 	authMethods := []ssh.AuthMethod{}
 
-	if cfg.SSKKeyFile != "" {
-		// TODO: validate that the file exists
-		privateKeyBytes, err := ioutil.ReadFile(cfg.SSKKeyFile)
-		if err != nil {
-			return nil, err
-		}
-		signer, err := ssh.ParsePrivateKey([]byte(privateKeyBytes))
-		if err != nil {
-			return nil, fmt.Errorf("Unable to parse private key: %+v", err)
-		}
-		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	signer, err := ssh.ParsePrivateKey(utils.EncodePrivateKeyToPEM(&cfg.SSHPrivateKey))
+	if err != nil {
+		return nil, fmt.Errorf("Unable to parse private key: %+v", err)
 	}
+	authMethods = append(authMethods, ssh.PublicKeys(signer))
 
-	if !cfg.DisableAgentForward {
+	if cfg.EnableAgentForward {
 		if sshAgent, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
 			authMethods = append(authMethods, ssh.PublicKeysCallback(agent.NewClient(sshAgent).Signers))
 		}

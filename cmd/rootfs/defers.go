@@ -1,4 +1,4 @@
-package build
+package rootfs
 
 type defers struct {
 	fs []func()

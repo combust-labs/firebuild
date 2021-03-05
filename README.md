@@ -49,15 +49,32 @@ cat <<EOF > /firecracker/cni/conf.d/machine-builds.conflist
 EOF
 ```
 
-## An example
+## Build the base operating system root file system
+
+Build a base operating system root file system. For example, Alpine Linux 3.13:
+
+```sh
+sudo /usr/local/go/bin/go run ./main.go baseos \
+    --dockerfile $(pwd)/baseos/_/alpine/3.13/Dockerfile \
+    --machine-rootfs-base=/firecracker/rootfs
+```
+
+### How is the base operating file system built
+
+TODO
+
+### Target directory
+
+TODO
+
+## Build an application VMM from a Dockerfile
 
 This will fail because the Dockerfile uses the `ADD` command. To succeed, clone the owning repository locally and reference the local file. Eventually, use the `git+http(s)://` URL scheme.
 
 This example assumes that SSH agent is started and the relevant version SSH key is in the agent.
 
 ```sh
-sudo bash
-/usr/local/go/bin/go run ./main.go build \
+sudo /usr/local/go/bin/go run ./main.go rootfs \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
@@ -75,7 +92,7 @@ sudo bash
 It's possible to reference a `Dockerfile` residing in the git repository available under a HTTP(s) URL. Here's an example:
 
 ```sh
-/usr/local/go/bin/go run ./main.go build \
+sudo /usr/local/go/bin/go run ./main.go rootfs \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
@@ -155,7 +172,7 @@ The program intends to support multi-stage `Dockerfile` builds. An example with 
 Build v0.2.8 using git repository link, leave SSH access on:
 
 ```sh
-/usr/local/go/bin/go run ./main.go build \
+/usr/local/go/bin/go run ./main.go rootfs \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
@@ -184,7 +201,7 @@ Excluded from the license:
 ### Postgres 13 with Debian Buster slim
 
 ```sh
-/usr/local/go/bin/go run ./main.go build \
+/usr/local/go/bin/go run ./main.go rootfs \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \

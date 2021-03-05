@@ -3,6 +3,7 @@ RUN apt-get update \
 	&& apt-get install -y --no-install-recommends gnupg iputils-ping openssh-server sudo sysvinit-core util-linux \
 	&& ssh-keygen -A \
 	&& mkdir -p /home/debian/.ssh \
+	&& touch /home/debian/.ssh/authorized_keys \
     && useradd -d /home/debian -U -s /bin/bash debian \
 	&& echo "debian:$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n1)" | chpasswd \
 	&& echo '%debian ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/debian \
@@ -18,7 +19,6 @@ RUN apt-get update \
 	&& update-rc.d procps defaults \
 	&& update-rc.d rc.local defaults \
 	&& update-rc.d urandom defaults
-COPY ./key.pub /home/debian/.ssh/authorized_keys
 RUN chown -R debian:debian /home/debian \
 	&& chmod 0740 /home/debian \
 	&& chmod 0700 /home/debian/.ssh \

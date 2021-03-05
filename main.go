@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/combust-labs/firebuild/cmd/build"
+	"github.com/combust-labs/firebuild/cmd/baseos"
+	"github.com/combust-labs/firebuild/cmd/rootfs"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +20,8 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(build.Command)
+	rootCmd.AddCommand(baseos.Command)
+	rootCmd.AddCommand(rootfs.Command)
 }
 
 func main() {

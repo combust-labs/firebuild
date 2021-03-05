@@ -1,4 +1,4 @@
-package build
+package rootfs
 
 import (
 	"context"
@@ -19,11 +19,13 @@ import (
 	"github.com/combust-labs/firebuild/build/utils"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/remote"
+	"github.com/combust-labs/firebuild/strategy"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/gofrs/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/sirupsen/logrus"
 
@@ -34,7 +36,7 @@ type stoppedOK = bool
 
 // Command is the build command declaration.
 var Command = &cobra.Command{
-	Use:   "build",
+	Use:   "rootfs",
 	Short: "Build A VMM root file system from a Docker image",
 	Run:   run,
 	Long:  ``,
@@ -58,17 +60,17 @@ type buildConfig struct {
 	JailerNumeNode int
 	JailerUID      int
 
-	MachineCNINetworkName         string
-	MachineCPUTemplate            string
-	MachineKernelArgs             string
-	MachineRootFSBase             string
-	MachineRootDrivePartUUID      string
-	MachineSSHKey                 string
-	MachineSSHDisableAgentForward bool
-	MachineSSHPort                int
-	MachineSSHUser                string
-	MachineVMLinux                string
-	NetNS                         string
+	MachineCNINetworkName        string
+	MachineCPUTemplate           string
+	MachineKernelArgs            string
+	MachineRootFSBase            string
+	MachineRootDrivePartUUID     string
+	MachineSSHEnableAgentForward bool
+	MachineSSHPort               int
+	MachineSSHUser               string
+	MachineSSHAuthorizedKeysFile string
+	MachineVMLinux               string
+	NetNS                        string
 
 	ResourcesCPU int64
 	ResourcesMem int64
@@ -93,6 +95,7 @@ var (
 	rootFSCopyBufferSize = 4 * 1024 * 1024
 	stoppedGracefully    = stoppedOK(true)
 	stoppedForcefully    = stoppedOK(false)
+	rsaKeySize           = 4096
 )
 
 func initFlags() {
@@ -129,12 +132,12 @@ func initFlags() {
 	Command.Flags().StringVar(&commandConfig.MachineCNINetworkName, "machine-cni-network-name", "", "CNI network within which the build should run. It's recommended to use a dedicated network for build process")
 	Command.Flags().StringVar(&commandConfig.MachineCPUTemplate, "machine-cpu-template", "", "CPU template (empty, C2 or T3)")
 	Command.Flags().StringVar(&commandConfig.MachineKernelArgs, "machine-kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
-	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside")
+	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside, required, can't be /")
 	Command.Flags().StringVar(&commandConfig.MachineRootDrivePartUUID, "machine-root-drive-partuuid", "", "Root drive part UUID")
-	Command.Flags().StringVar(&commandConfig.MachineSSHKey, "machine-ssh-key-file", "", "Path to the SSH key file")
-	Command.Flags().BoolVar(&commandConfig.MachineSSHDisableAgentForward, "machine-ssh-disable-agent-forward", false, "If set, disables SSH agent forward")
+	Command.Flags().BoolVar(&commandConfig.MachineSSHEnableAgentForward, "machine-ssh-enable-agent-forward", false, "If set, enables SSH agent forward")
 	Command.Flags().IntVar(&commandConfig.MachineSSHPort, "machine-ssh-port", 22, "SSH port")
 	Command.Flags().StringVar(&commandConfig.MachineSSHUser, "machine-ssh-user", "", "SSH user")
+	Command.Flags().StringVar(&commandConfig.MachineSSHUser, "machine-ssh-authorized-keys-file", "", "SSH user")
 	Command.Flags().StringVar(&commandConfig.MachineVMLinux, "machine-vmlinux", "", "Kernel file path")
 	Command.Flags().Int64Var(&commandConfig.ResourcesCPU, "resources-cpu", 1, "Number of CPU for the build VMM")
 	Command.Flags().Int64Var(&commandConfig.ResourcesMem, "resources-mem", 128, "Amount of memory for the VMM")
@@ -149,7 +152,12 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	cleanup := &defers{fs: []func(){}}
 	defer cleanup.exec()
 
-	rootLogger := configs.NewLogger("build", logConfig)
+	rootLogger := configs.NewLogger("rootfs", logConfig)
+
+	if commandConfig.MachineRootFSBase == "" || commandConfig.MachineRootFSBase == "/" {
+		rootLogger.Error("--machine-rootfs-base is empty or /")
+		os.Exit(1)
+	}
 
 	if commandConfig.Tag == "" {
 		rootLogger.Error("--tag is required")
@@ -187,6 +195,19 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	mainStage := unnamed[0]
 	if !mainStage.IsValid() {
 		rootLogger.Error("main build stage invalid: no base to build from")
+		cleanup.exec() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+
+	rsaPrivateKey, rsaPrivateKeyErr := utils.GenerateRSAPrivateKey(rsaKeySize)
+	if rsaPrivateKeyErr != nil {
+		rootLogger.Error("failed generating private key for the VMM build", "reason", rsaPrivateKeyErr)
+		cleanup.exec() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+	sshPublicKey, sshPublicKeyErr := utils.GetSSHKey(rsaPrivateKey)
+	if sshPublicKeyErr != nil {
+		rootLogger.Error("failed generating public SSH key from the private RSA key", "reason", sshPublicKeyErr)
 		cleanup.exec() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
@@ -235,16 +256,10 @@ func run(cobraCommand *cobra.Command, _ []string) {
 					cleanup.exec() // manually - defers don't run on os.Exit
 					os.Exit(1)
 				}
-				dependencyBuilder, builderError := build.NewDefaultDependencyBuild(dependencyStage, tempDirectory, filepath.Join(tempDirectory, "sources"))
-				if builderError != nil {
-					rootLogger.Error("failed constructing dependency builder", "stage", stage.Name(), "dependency", dependency, "reason", builderError)
-					cleanup.exec() // manually - defers don't run on os.Exit
-					os.Exit(1)
-				}
+				dependencyBuilder := build.NewDefaultDependencyBuild(dependencyStage, tempDirectory, filepath.Join(tempDirectory, "sources"))
 				resolvedResources, buildError := dependencyBuilder.Build(requiredCopies)
 				if buildError != nil {
 					rootLogger.Error("failed building stage dependency", "stage", stage.Name(), "dependency", dependency, "reason", buildError)
-					dependencyBuilder.Cleanup()
 					cleanup.exec() // manually - defers don't run on os.Exit
 					os.Exit(1)
 				}
@@ -281,6 +296,23 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		vmmLogger.Info("cleaning up jail directory")
 		status := os.RemoveAll(jailDirectory)
 		vmmLogger.Info("jail directory removal status", "error", status)
+	})
+
+	strategyConfig := &strategy.SSHKeyInjectingHandlerConfig{
+		Chroot:         jailDirectory,
+		RootfsFileName: filepath.Base(buildRootfs),
+		SSHUser:        commandConfig.MachineSSHUser,
+		PublicKeys: []ssh.PublicKey{
+			sshPublicKey,
+		},
+	}
+
+	strategy := strategy.NewSSHKeyInjectingStrategy(rootLogger, strategyConfig, func() strategy.HandlerWithRequirement {
+		return strategy.HandlerWithRequirement{
+			AppendAfter: firecracker.CreateLogFilesHandlerName,
+			// replicate what firecracker.NaiveChrootStrategy is doing...
+			Handler: firecracker.LinkFilesHandler(filepath.Base(commandConfig.MachineVMLinux)),
+		}
 	})
 
 	var fifo io.WriteCloser // TODO: do it like firectl does it
@@ -325,7 +357,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			JailerBinary:   commandConfig.BinaryJailer,
 			ChrootBaseDir:  commandConfig.ChrootBase,
 			Daemonize:      false,
-			ChrootStrategy: firecracker.NewNaiveChrootStrategy(commandConfig.MachineVMLinux),
+			ChrootStrategy: strategy,
 			Stdout:         os.Stdout,
 			Stderr:         os.Stderr,
 			// do not pass stdin because the build VMM does not require input
@@ -353,11 +385,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	vmmLogger.Info("VMM running", "ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String())
 
 	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
-		SSKKeyFile:          commandConfig.MachineSSHKey,
-		SSHUsername:         commandConfig.MachineSSHUser,
-		IP:                  ifaceStaticConfig.IPConfiguration.IPAddr.IP,
-		Port:                commandConfig.MachineSSHPort,
-		DisableAgentForward: commandConfig.MachineSSHDisableAgentForward,
+		SSHPrivateKey:      *rsaPrivateKey,
+		SSHUsername:        commandConfig.MachineSSHUser,
+		IP:                 ifaceStaticConfig.IPConfiguration.IPAddr.IP,
+		Port:               commandConfig.MachineSSHPort,
+		EnableAgentForward: commandConfig.MachineSSHEnableAgentForward,
 	}, vmmLogger.Named("remote-client"))
 
 	if remoteErr != nil {
