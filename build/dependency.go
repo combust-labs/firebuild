@@ -12,7 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/resources"
@@ -209,76 +209,170 @@ func (ddb *defaultDependencyBuild) ImageBuild(source, dockerfilePath, tagName st
 
 func (ddb *defaultDependencyBuild) ImageBaseOSExport(path, tagName string) error {
 
-	// TODO: this stuff needs to be tidied up...
-
 	opLogger := ddb.logger.With("tag-name", tagName)
 
-	opLogger.Debug("exporting Docker container data")
+	// TODO: extract to the outside of the function
+	mkdirOnlyDirs := []string{"/boot", "/opt", "/proc", "/run", "/srv", "/sys", "/tmp", "/var"}
+	containerStopTimeout := time.Duration(time.Second * 15)
+	fsCopyTimeout := time.Duration(time.Second * 15)
 
-	resp, err := ddb.dockerClient.ContainerCreate(context.Background(), &container.Config{
+	containerConfig := &container.Config{
 		OpenStdin: true,
 		Tty:       true,
-		Cmd:       strslice.StrSlice([]string{"/bin/sh"}),
+		Cmd:       strslice.StrSlice([]string{"/bin/sh"}), // TODO: extract this to the outside of the function
 		Image:     tagName,
-	}, &container.HostConfig{
+	}
+
+	hostConfig := &container.HostConfig{
 		Mounts: []mount.Mount{
 			{
 				Type:   mount.TypeBind,
 				Source: path,
-				Target: "/export-rootfs",
+				Target: "/export-rootfs", // TODO: extract this to the outside of the function
 			},
 		},
-	}, nil, nil, "")
-	if err != nil {
-		opLogger.Error("failed creating a Docker container using tag name", "reason", err)
+	}
+
+	// Doing this export through TAR, without starting the container, is much more work
+	// than simply starting a container. When doing this by doing image export,
+	// there is a need to:
+	// - track links manually
+	// - track symlinks manually
+	// - all the chmod, chown, chtimes accounting
+	// - special devices aren't properly carried through
+
+	opLogger.Debug("starting base OS Docker container for rootfs export")
+
+	containerStartResponse, startErr := ddb.dockerClient.ContainerCreate(context.Background(), containerConfig, hostConfig, nil, nil, "")
+	if startErr != nil {
+		opLogger.Error("failed creating a Docker container", "reason", startErr)
+		return startErr
+	}
+
+	opLogger = opLogger.With("container-id", containerStartResponse.ID)
+	opLogger.Debug("container started")
+
+	if err := ddb.dockerClient.ContainerStart(context.Background(), containerStartResponse.ID, types.ContainerStartOptions{}); err != nil {
+		opLogger.Error("failed starting a Docker container", "reason", err)
 		return err
 	}
 
-	if err := ddb.dockerClient.ContainerStart(context.Background(), resp.ID, types.ContainerStartOptions{}); err != nil {
-		opLogger.Error("failed starting a Docker container using tag name", "container-id", resp.ID, "reason", err)
-		return err
-	}
+	mkdirOnlyDirsStr := "LIST=\"" + strings.Join(mkdirOnlyDirs, " ") + "\"; "
 
 	commands := []string{
 		// these ones should have an empty directory only:
-		"LIST=\"/boot /opt /proc /run /srv /sys /tmp\"; for d in $(find / -maxdepth 1 -type d); do if echo $LIST | grep -w $d > /dev/null; then mkdir /export-rootfs${d}; fi; done; exit 0",
+		mkdirOnlyDirsStr + "for d in $(find / -maxdepth 1 -type d); do if echo $LIST | grep -w $d > /dev/null; then mkdir /export-rootfs${d}; fi; done; exit 0",
 		// these are the ones I want to copy, when they don't exist in the list:
-		"LIST=\"/boot /opt /proc /run /srv /sys /tmp\"; for d in $(find / -maxdepth 1 -type d); do if echo $LIST | grep -v -w $d > /dev/null; then case \"$d\" in \"/\") ;; *) tar c \"$d\" | tar x -C /export-rootfs ;; esac; fi; done",
+		mkdirOnlyDirsStr + "for d in $(find / -maxdepth 1 -type d); do if echo $LIST | grep -v -w $d > /dev/null; then case \"$d\" in \"/\") ;; *) tar c \"$d\" | tar x -C /export-rootfs ;; esac; fi; done",
 	}
 
-	for _, command := range commands {
-		execIDResponse, execErr := ddb.dockerClient.ContainerExecCreate(context.Background(), resp.ID, types.ExecConfig{
+	for idx, command := range commands {
+
+		opLogger.Debug(fmt.Sprintf("running exec %d of %d", idx+1, len(commands)))
+
+		execIDResponse, execErr := ddb.dockerClient.ContainerExecCreate(context.Background(), containerStartResponse.ID, types.ExecConfig{
 			AttachStdout: true,
 			AttachStderr: true,
-			Cmd:          []string{"/bin/sh", "-c", command},
+			Cmd:          []string{"/bin/sh", "-c", command}, // TODO: extract the shell to the outside of the function
 		})
 		if execErr != nil {
-			opLogger.Error("error creating exec", "container-id", resp.ID, "reason", execErr)
+			opLogger.Error("error creating exec", "container-id", containerStartResponse.ID, "reason", execErr)
 			return execErr
 		}
 
-		waiter := sync.WaitGroup{}
 		hijackedConn, execAttachErr := ddb.dockerClient.ContainerExecAttach(context.Background(), execIDResponse.ID, types.ExecStartCheck{
 			Tty: true,
 		})
 		if execAttachErr != nil {
-			opLogger.Error("error attaching exec", "container-id", resp.ID, "reason", execAttachErr)
+			opLogger.Error("error attaching exec", "reason", execAttachErr)
 			return execAttachErr
 		}
-		waiter.Add(1)
+
+		chanDone := make(chan struct{}, 1)
+		chanError := make(chan error, 1)
+		execReadCtx, execReadCtxCancelFunc := context.WithTimeout(context.Background(), fsCopyTimeout)
+		defer execReadCtxCancelFunc()
+
 		go func() {
+			defer hijackedConn.Close()
 			for {
 				bs, err := hijackedConn.Reader.ReadBytes('\n')
-				if err != nil && err == io.EOF {
-					break
+				if execReadCtx.Err() != nil {
+					return
 				}
-				fmt.Print(" ======================> attach said", string(bs))
+				if err != nil {
+					if err == io.EOF {
+						close(chanDone)
+						return // finished reading successfully
+					}
+					chanError <- err
+					return
+				}
+				opLogger.Debug("exec attach output", strings.TrimSpace(string(bs)))
 			}
-			hijackedConn.Close()
-			waiter.Done()
 		}()
 
-		waiter.Wait()
+		select {
+		case <-chanDone:
+			opLogger.Debug(fmt.Sprintf("exec %d of %d finished successfully", idx+1, len(commands)))
+			close(chanError)
+		case execReadErr := <-chanError:
+			opLogger.Error(fmt.Sprintf("exec %d of %d finished with error", idx+1, len(commands)), "reason", execReadErr)
+			close(chanDone)
+			return execReadErr
+		case <-execReadCtx.Done():
+			// the context finished with error
+			close(chanDone)
+			close(chanError)
+			if execReadCtx.Err() != nil {
+				opLogger.Error(fmt.Sprintf("exec %d of %d finished with context error", idx+1, len(commands)), "reason", execReadCtx.Err())
+				return execReadCtx.Err()
+			}
+		}
+	}
+
+	opLogger.Debug("stopping container")
+
+	go func() {
+		if stopError := ddb.dockerClient.ContainerStop(context.Background(), containerStartResponse.ID, &containerStopTimeout); stopError != nil {
+			opLogger.Warn("problem stopping the container gracefully, killing", "reason", stopError)
+			if killError := ddb.dockerClient.ContainerKill(context.Background(), containerStartResponse.ID, "SIGKILL"); killError != nil {
+				opLogger.Warn("container kill also returned an error", "reason", killError)
+			}
+		}
+	}()
+
+	opLogger.Debug("waiting for container to stop")
+
+	chanStopOK, chanStopErr := ddb.dockerClient.ContainerWait(context.Background(), containerStartResponse.ID, container.WaitConditionNotRunning)
+	select {
+	case ok := <-chanStopOK:
+		opLogger.Debug("container stopped", "exit-code", ok.StatusCode, "error-message", ok.Error)
+	case stopErr := <-chanStopErr:
+		opLogger.Warn("container stop wait returned an error", "reason", stopErr)
+	}
+
+	containerRemoveOptions := types.ContainerRemoveOptions{
+		RemoveVolumes: true,
+		Force:         true,
+	}
+
+	opLogger.Debug("container started")
+
+	go func() {
+		if removeError := ddb.dockerClient.ContainerRemove(context.Background(), containerStartResponse.ID, containerRemoveOptions); removeError != nil {
+			opLogger.Warn("problem removing the container", "reason", removeError)
+		}
+	}()
+
+	opLogger.Debug("waiting for container to be removed")
+
+	chanRemoveOK, chanRemoveErr := ddb.dockerClient.ContainerWait(context.Background(), containerStartResponse.ID, container.WaitConditionRemoved)
+	select {
+	case ok := <-chanRemoveOK:
+		opLogger.Debug("container removed", "exit-code", ok.StatusCode, "error-message", ok.Error)
+	case removeError := <-chanRemoveErr:
+		opLogger.Warn("container stop wait returned an error", "reason", removeError)
 	}
 
 	return nil
