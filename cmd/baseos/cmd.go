@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -144,7 +143,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	rootLogger.Info("image ready, creating EXT4 root file system file", "os", osToBuild)
 
 	rootFSFile := fmt.Sprintf("%s/rootfs.ext4", tempDirectory)
-	if err := createRootFSFile(rootFSFile, commandConfig.FSSizeMBs); err != nil {
+	if err := utils.CreateRootFSFile(rootFSFile, commandConfig.FSSizeMBs); err != nil {
 		rootLogger.Error("failed creating rootfs file", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
@@ -152,7 +151,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	rootLogger.Info("EXT4 file created, making file system", "path", rootFSFile, "size-mb", commandConfig.FSSizeMBs)
 
-	if err := mkfsExt4(rootFSFile); err != nil {
+	if err := utils.MkfsExt4(rootFSFile); err != nil {
 		rootLogger.Error("failed creating EXT4 in rootfs file", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
@@ -169,7 +168,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	if err := mount(rootFSFile, mountDir); err != nil {
+	if err := utils.Mount(rootFSFile, mountDir); err != nil {
 		rootLogger.Error("failed mounting rootfs file in mount dir", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
@@ -188,7 +187,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	if err := umount(mountDir); err != nil {
+	if err := utils.Umount(mountDir); err != nil {
 		rootLogger.Error("failed unmounting rootfs mount dir", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
@@ -197,85 +196,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	rootLogger.Info("EXT4 file unmounted from mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
 
 	// TODO: move to final real destination
-	_, cmdErr := runShellCommandNoSudo(fmt.Sprintf("mv %s /tmp/rootfs.test", rootFSFile))
+	_, cmdErr := utils.RunShellCommandNoSudo(fmt.Sprintf("mv %s /tmp/rootfs.test", rootFSFile))
 	if cmdErr != nil {
 		rootLogger.Error("failed moving produced file system", "reason", cmdErr)
 	}
 
 	os.RemoveAll(tempDirectory)
 
-}
-
-func createRootFSFile(path string, size int) error {
-	exitCode, cmdErr := runShellCommandNoSudo(fmt.Sprintf("dd if=/dev/zero of=%s bs=1M count=%d", path, size))
-	if cmdErr != nil {
-		return cmdErr
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("coomand finished with non-zero exit code")
-	}
-	return nil
-}
-
-func mkfsExt4(path string) error {
-	exitCode, cmdErr := runShellCommandNoSudo(fmt.Sprintf("mkfs.ext4 %s", path))
-	if cmdErr != nil {
-		return cmdErr
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("coomand finished with non-zero exit code")
-	}
-	return nil
-}
-
-func mount(file, dir string) error {
-	exitCode, cmdErr := runShellCommand(fmt.Sprintf("mount %s %s", file, dir), true)
-	if cmdErr != nil {
-		return cmdErr
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("command finished with non-zero exit code")
-	}
-	return nil
-}
-
-func umount(dir string) error {
-	exitCode, cmdErr := runShellCommand(fmt.Sprintf("umount %s", dir), true)
-	if cmdErr != nil {
-		return cmdErr
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("command finished with non-zero exit code")
-	}
-	return nil
-}
-
-func runShellCommandNoSudo(command string) (int, error) {
-	return runShellCommand(command, false)
-}
-
-func runShellCommand(command string, sudo bool) (int, error) {
-	if sudo {
-		command = fmt.Sprintf("sudo %s", command)
-	}
-	cmd := exec.Command("/bin/sh", []string{`-c`, command}...)
-	cmd.Stderr = os.Stderr
-	stdOut, err := cmd.StdoutPipe()
-	if err != nil {
-		return 1, fmt.Errorf("failed redirecting stdout: %+v", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return 1, fmt.Errorf("failed command start: %+v", err)
-	}
-	_, readErr := ioutil.ReadAll(stdOut)
-	if readErr != nil {
-		return 1, fmt.Errorf("failed reading output: %+v", readErr)
-	}
-	if err := cmd.Wait(); err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
-			return exitError.ExitCode(), exitError
-		}
-		return 1, fmt.Errorf("failed waiting for command: %+v", err)
-	}
-	return 0, nil
 }

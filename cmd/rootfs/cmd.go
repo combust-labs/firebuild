@@ -19,6 +19,7 @@ import (
 	"github.com/combust-labs/firebuild/build/utils"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/remote"
+	"github.com/combust-labs/firebuild/strategy"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/gofrs/uuid"
@@ -277,6 +278,20 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		vmmLogger.Info("jail directory removal status", "error", status)
 	})
 
+	strategyConfig := &strategy.SSHKeyInjectingHandlerConfig{
+		Chroot:         jailDirectory,
+		RootfsFileName: filepath.Base(buildRootfs),
+		SSHUser:        commandConfig.MachineSSHUser,
+	}
+
+	strategy := strategy.NewSSHKeyInjectingStrategy(rootLogger, strategyConfig, func() strategy.HandlerWithRequirement {
+		return strategy.HandlerWithRequirement{
+			AppendAfter: firecracker.CreateLogFilesHandlerName,
+			// replicate what firecracker.NaiveChrootStrategy is doing...
+			Handler: firecracker.LinkFilesHandler(filepath.Base(commandConfig.MachineVMLinux)),
+		}
+	})
+
 	var fifo io.WriteCloser // TODO: do it like firectl does it
 
 	fcConfig := firecracker.Config{
@@ -319,7 +334,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			JailerBinary:   commandConfig.BinaryJailer,
 			ChrootBaseDir:  commandConfig.ChrootBase,
 			Daemonize:      false,
-			ChrootStrategy: firecracker.NewNaiveChrootStrategy(commandConfig.MachineVMLinux),
+			ChrootStrategy: strategy,
 			Stdout:         os.Stdout,
 			Stderr:         os.Stderr,
 			// do not pass stdin because the build VMM does not require input
