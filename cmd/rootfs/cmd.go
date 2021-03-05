@@ -25,6 +25,7 @@ import (
 	"github.com/gofrs/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/sirupsen/logrus"
 
@@ -59,17 +60,17 @@ type buildConfig struct {
 	JailerNumeNode int
 	JailerUID      int
 
-	MachineCNINetworkName         string
-	MachineCPUTemplate            string
-	MachineKernelArgs             string
-	MachineRootFSBase             string
-	MachineRootDrivePartUUID      string
-	MachineSSHKey                 string
-	MachineSSHDisableAgentForward bool
-	MachineSSHPort                int
-	MachineSSHUser                string
-	MachineVMLinux                string
-	NetNS                         string
+	MachineCNINetworkName        string
+	MachineCPUTemplate           string
+	MachineKernelArgs            string
+	MachineRootFSBase            string
+	MachineRootDrivePartUUID     string
+	MachineSSHEnableAgentForward bool
+	MachineSSHPort               int
+	MachineSSHUser               string
+	MachineSSHAuthorizedKeysFile string
+	MachineVMLinux               string
+	NetNS                        string
 
 	ResourcesCPU int64
 	ResourcesMem int64
@@ -94,6 +95,7 @@ var (
 	rootFSCopyBufferSize = 4 * 1024 * 1024
 	stoppedGracefully    = stoppedOK(true)
 	stoppedForcefully    = stoppedOK(false)
+	rsaKeySize           = 4096
 )
 
 func initFlags() {
@@ -132,10 +134,10 @@ func initFlags() {
 	Command.Flags().StringVar(&commandConfig.MachineKernelArgs, "machine-kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
 	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside")
 	Command.Flags().StringVar(&commandConfig.MachineRootDrivePartUUID, "machine-root-drive-partuuid", "", "Root drive part UUID")
-	Command.Flags().StringVar(&commandConfig.MachineSSHKey, "machine-ssh-key-file", "", "Path to the SSH key file")
-	Command.Flags().BoolVar(&commandConfig.MachineSSHDisableAgentForward, "machine-ssh-disable-agent-forward", false, "If set, disables SSH agent forward")
+	Command.Flags().BoolVar(&commandConfig.MachineSSHEnableAgentForward, "machine-ssh-enable-agent-forward", false, "If set, enables SSH agent forward")
 	Command.Flags().IntVar(&commandConfig.MachineSSHPort, "machine-ssh-port", 22, "SSH port")
 	Command.Flags().StringVar(&commandConfig.MachineSSHUser, "machine-ssh-user", "", "SSH user")
+	Command.Flags().StringVar(&commandConfig.MachineSSHUser, "machine-ssh-authorized-keys-file", "", "SSH user")
 	Command.Flags().StringVar(&commandConfig.MachineVMLinux, "machine-vmlinux", "", "Kernel file path")
 	Command.Flags().Int64Var(&commandConfig.ResourcesCPU, "resources-cpu", 1, "Number of CPU for the build VMM")
 	Command.Flags().Int64Var(&commandConfig.ResourcesMem, "resources-mem", 128, "Amount of memory for the VMM")
@@ -188,6 +190,19 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	mainStage := unnamed[0]
 	if !mainStage.IsValid() {
 		rootLogger.Error("main build stage invalid: no base to build from")
+		cleanup.exec() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+
+	rsaPrivateKey, rsaPrivateKeyErr := utils.GenerateRSAPrivateKey(rsaKeySize)
+	if rsaPrivateKeyErr != nil {
+		rootLogger.Error("failed generating private key for the VMM build", "reason", rsaPrivateKeyErr)
+		cleanup.exec() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+	sshPublicKey, sshPublicKeyErr := utils.GetSSHKey(rsaPrivateKey)
+	if sshPublicKeyErr != nil {
+		rootLogger.Error("failed generating public SSH key from the private RSA key", "reason", sshPublicKeyErr)
 		cleanup.exec() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
@@ -282,6 +297,9 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		Chroot:         jailDirectory,
 		RootfsFileName: filepath.Base(buildRootfs),
 		SSHUser:        commandConfig.MachineSSHUser,
+		PublicKeys: []ssh.PublicKey{
+			sshPublicKey,
+		},
 	}
 
 	strategy := strategy.NewSSHKeyInjectingStrategy(rootLogger, strategyConfig, func() strategy.HandlerWithRequirement {
@@ -362,11 +380,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	vmmLogger.Info("VMM running", "ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String())
 
 	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
-		SSKKeyFile:          commandConfig.MachineSSHKey,
-		SSHUsername:         commandConfig.MachineSSHUser,
-		IP:                  ifaceStaticConfig.IPConfiguration.IPAddr.IP,
-		Port:                commandConfig.MachineSSHPort,
-		DisableAgentForward: commandConfig.MachineSSHDisableAgentForward,
+		SSHPrivateKey:      *rsaPrivateKey,
+		SSHUsername:        commandConfig.MachineSSHUser,
+		IP:                 ifaceStaticConfig.IPConfiguration.IPAddr.IP,
+		Port:               commandConfig.MachineSSHPort,
+		EnableAgentForward: commandConfig.MachineSSHEnableAgentForward,
 	}, vmmLogger.Named("remote-client"))
 
 	if remoteErr != nil {

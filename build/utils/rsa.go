@@ -3,6 +3,8 @@ package utils
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -11,6 +13,19 @@ import (
 const (
 	RSABitSize = 4096
 )
+
+// EncodePrivateKeyToPEM encodes Private Key from RSA to PEM format.
+func EncodePrivateKeyToPEM(privateKey *rsa.PrivateKey) []byte {
+	privDER := x509.MarshalPKCS1PrivateKey(privateKey)
+	// pem.Block
+	privBlock := pem.Block{
+		Type:    "RSA PRIVATE KEY",
+		Headers: nil,
+		Bytes:   privDER,
+	}
+	// Private key in PEM format
+	return pem.EncodeToMemory(&privBlock)
+}
 
 // GenerateRSAPrivateKey generates a new RSA private key.
 func GenerateRSAPrivateKey(bitSize int) (*rsa.PrivateKey, error) {
@@ -27,9 +42,9 @@ func GenerateRSAPrivateKey(bitSize int) (*rsa.PrivateKey, error) {
 	return privateKey, nil
 }
 
-// GenerateRSAPublicKey generates an RSA public key for the given private key
-func GenerateRSAPublicKey(privatekey *rsa.PublicKey) (ssh.PublicKey, error) {
-	publicRsaKey, err := ssh.NewPublicKey(privatekey)
+// GetSSHKey generates an SSH public key for the given private key.
+func GetSSHKey(privatekey *rsa.PrivateKey) (ssh.PublicKey, error) {
+	publicRsaKey, err := ssh.NewPublicKey(&privatekey.PublicKey)
 	if err != nil {
 		return nil, err
 	}
