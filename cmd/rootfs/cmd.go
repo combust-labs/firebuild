@@ -132,7 +132,7 @@ func initFlags() {
 	Command.Flags().StringVar(&commandConfig.MachineCNINetworkName, "machine-cni-network-name", "", "CNI network within which the build should run. It's recommended to use a dedicated network for build process")
 	Command.Flags().StringVar(&commandConfig.MachineCPUTemplate, "machine-cpu-template", "", "CPU template (empty, C2 or T3)")
 	Command.Flags().StringVar(&commandConfig.MachineKernelArgs, "machine-kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
-	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside")
+	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside, required, can't be /")
 	Command.Flags().StringVar(&commandConfig.MachineRootDrivePartUUID, "machine-root-drive-partuuid", "", "Root drive part UUID")
 	Command.Flags().BoolVar(&commandConfig.MachineSSHEnableAgentForward, "machine-ssh-enable-agent-forward", false, "If set, enables SSH agent forward")
 	Command.Flags().IntVar(&commandConfig.MachineSSHPort, "machine-ssh-port", 22, "SSH port")
@@ -153,6 +153,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	defer cleanup.exec()
 
 	rootLogger := configs.NewLogger("rootfs", logConfig)
+
+	if commandConfig.MachineRootFSBase == "" || commandConfig.MachineRootFSBase == "/" {
+		rootLogger.Error("--machine-rootfs-base is empty or /")
+		os.Exit(1)
+	}
 
 	if commandConfig.Tag == "" {
 		rootLogger.Error("--tag is required")

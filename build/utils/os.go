@@ -2,9 +2,11 @@ package utils
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // CreateRootFSFile uses dd to create a rootfs file of given size at a given path.
@@ -43,15 +45,85 @@ func Mount(file, dir string) error {
 	return nil
 }
 
-// Umount sudo umounts a location.
-func Umount(dir string) error {
-	exitCode, cmdErr := RunShellCommandSudo(fmt.Sprintf("umount %s", dir))
-	if cmdErr != nil {
-		return cmdErr
+// MoveFile moves file from one location to another
+// and create intermediate directories.
+// If the target file already exists, it will be truncated to size 0 first.
+func MoveFile(source, target string) error {
+
+	// TODO: implement a backup mechanism
+
+	success := false
+
+	sourceStat, err := os.Stat(source)
+	if err != nil {
+		return err
 	}
-	if exitCode != 0 {
-		return fmt.Errorf("command finished with non-zero exit code")
+	if !sourceStat.Mode().IsRegular() {
+		return fmt.Errorf("source is not regular file")
 	}
+	if err := os.MkdirAll(filepath.Dir(target), 0664); err != nil {
+		return err
+	}
+
+	// open writable file:
+	writableFile, err := os.OpenFile(target, os.O_RDWR, 0664)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := writableFile.Close(); err != nil {
+			fmt.Printf("failed closing writable file, reason: %+v", err)
+		}
+		if !success {
+			// write failed, remove the file...
+			if err := os.Remove(target); err != nil {
+				fmt.Printf("failed removing target file on unsuccessful move, trash left, reason: %+v", err)
+			}
+		}
+	}()
+
+	if err := writableFile.Truncate(0); err != nil {
+		return err
+	}
+
+	// open readable file:
+	readableFile, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := readableFile.Close(); err != nil {
+			fmt.Printf("failed closing readable file, reason: %+v", err)
+		}
+		if success {
+			// write failed, remove the file...
+			if err := os.Remove(source); err != nil {
+				fmt.Printf("failed removing source file on successful move, trash left, reason: %+v", err)
+			}
+		}
+	}()
+
+	// rewrite the file:
+	buf := make([]byte, 8*1024*1024)
+	for {
+		read, err := readableFile.Read(buf)
+		if read == 0 && err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("error reading source file, reason: %+v", err)
+		}
+		written, err := writableFile.Write(buf[0:read])
+		if err != nil {
+			return fmt.Errorf("error writing target file, reason: %+v", err)
+		}
+		if written != read {
+			fmt.Println(fmt.Sprintf("warning, written '%d' vs read '%d' did not match", written, read))
+		}
+	}
+
+	success = true
+
 	return nil
 }
 
@@ -64,6 +136,20 @@ func RunShellCommandNoSudo(command string) (int, error) {
 func RunShellCommandSudo(command string) (int, error) {
 	return runShellCommand(command, true)
 }
+
+// Umount sudo umounts a location.
+func Umount(dir string) error {
+	exitCode, cmdErr := RunShellCommandSudo(fmt.Sprintf("umount %s", dir))
+	if cmdErr != nil {
+		return cmdErr
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("command finished with non-zero exit code")
+	}
+	return nil
+}
+
+// --
 
 func runShellCommand(command string, sudo bool) (int, error) {
 	if sudo {

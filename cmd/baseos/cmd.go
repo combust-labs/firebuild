@@ -32,8 +32,9 @@ var Command = &cobra.Command{
 }
 
 type buildConfig struct {
-	Dockerfile string
-	FSSizeMBs  int
+	Dockerfile        string
+	FSSizeMBs         int
+	MachineRootFSBase string
 }
 
 var (
@@ -44,6 +45,7 @@ var (
 func initFlags() {
 	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Full path to the base OS Dockerfile")
 	Command.Flags().IntVar(&commandConfig.FSSizeMBs, "filesystem-size-mbs", 500, "File system size in megabytes")
+	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside, required, can't be /")
 	// Log settings:
 	Command.Flags().StringVar(&logConfig.LogLevel, "log-level", "debug", "Log level")
 	Command.Flags().BoolVar(&logConfig.LogAsJSON, "log-as-json", false, "Log as JSON")
@@ -58,6 +60,11 @@ func init() {
 func run(cobraCommand *cobra.Command, _ []string) {
 
 	rootLogger := configs.NewLogger("baseos", logConfig)
+
+	if commandConfig.MachineRootFSBase == "" || commandConfig.MachineRootFSBase == "/" {
+		rootLogger.Error("--machine-rootfs-base is empty or /")
+		os.Exit(1)
+	}
 
 	dockerStat, statErr := os.Stat(commandConfig.Dockerfile)
 	if statErr != nil {
@@ -103,16 +110,24 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	// find out what OS are we building:
-	var osToBuild string
+	fromFound := false
+	fromToBuild := commands.From{}
 	for _, cmd := range scs.Unnamed()[0].Commands() {
 		switch tcmd := cmd.(type) {
 		case commands.From:
-			osToBuild = tcmd.BaseImage
+			fromFound = true
+			fromToBuild = tcmd
 			break
 		}
 	}
 
-	rootLogger.Info("building base operating system root file system", "os", osToBuild)
+	if !fromFound {
+		rootLogger.Error("unnamed stage without a FROM command")
+		os.RemoveAll(tempDirectory)
+		os.Exit(1)
+	}
+
+	rootLogger.Info("building base operating system root file system", "os", fromToBuild.BaseImage)
 
 	// we have to build the Docker image, we can use the dependency builder here:
 	client, clientErr := containers.GetDefaultClient()
@@ -124,7 +139,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	tagName := strings.ToLower(utils.RandStringBytes(32)) + ":build"
 
-	rootLogger.Info("building base operating system Docker image", "os", osToBuild)
+	rootLogger.Info("building base operating system Docker image", "os", fromToBuild.BaseImage)
 
 	if err := containers.ImageBuild(context.Background(), client, rootLogger,
 		filepath.Dir(commandConfig.Dockerfile), "Dockerfile", tagName); err != nil {
@@ -140,7 +155,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	rootLogger.Info("image ready, creating EXT4 root file system file", "os", osToBuild)
+	rootLogger.Info("image ready, creating EXT4 root file system file", "os", fromToBuild.BaseImage)
 
 	rootFSFile := fmt.Sprintf("%s/rootfs.ext4", tempDirectory)
 	if err := utils.CreateRootFSFile(rootFSFile, commandConfig.FSSizeMBs); err != nil {
@@ -195,12 +210,17 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	rootLogger.Info("EXT4 file unmounted from mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
 
-	// TODO: move to final real destination
-	_, cmdErr := utils.RunShellCommandNoSudo(fmt.Sprintf("mv %s /tmp/rootfs.test", rootFSFile))
-	if cmdErr != nil {
-		rootLogger.Error("failed moving produced file system", "reason", cmdErr)
+	structuredBase := fromToBuild.ToStructuredFrom()
+	rootFsTargetFile := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), "root.ext4")
+
+	if err := utils.MoveFile(rootFSFile, rootFsTargetFile); err != nil {
+		rootLogger.Error("failed moving produced file system", "reason", err)
 	}
 
-	os.RemoveAll(tempDirectory)
+	rootLogger.Info("Base file system built successfully", "final-rootfs", rootFsTargetFile)
+
+	if err := os.RemoveAll(tempDirectory); err != nil {
+		rootLogger.Error("failed cleaning up temp directory after build, trash left, clean up manually", "temp-directory", tempDirectory, "reason", err)
+	}
 
 }
