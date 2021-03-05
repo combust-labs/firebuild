@@ -1,6 +1,7 @@
 package baseos
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"io/ioutil"
@@ -9,12 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/combust-labs/firebuild/build"
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/reader"
 	"github.com/combust-labs/firebuild/build/stage"
 	"github.com/combust-labs/firebuild/build/utils"
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/containers"
 	"github.com/spf13/cobra"
 )
 
@@ -71,7 +72,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	tempDirectory, err := ioutil.TempDir("", "")
 	if err != nil {
-		rootLogger.Error("Failed creating temporary build directory", "reason", err)
+		rootLogger.Error("failed creating temporary build directory", "reason", err)
 		os.Exit(1)
 	}
 
@@ -80,14 +81,14 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	// no multi-stage builds - only main stage
 	readResults, err := reader.ReadFromString(commandConfig.Dockerfile, tempDirectory)
 	if err != nil {
-		rootLogger.Error("Failed parsing Dockerfile", "reason", err)
+		rootLogger.Error("failed parsing Dockerfile", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
 
 	scs, errs := stage.ReadStages(readResults.Commands())
 	for _, err := range errs {
-		rootLogger.Warn("Stages read contained an error", "reason", err)
+		rootLogger.Warn("stages read contained an error", "reason", err)
 	}
 
 	if len(scs.Unnamed()) != 1 {
@@ -97,7 +98,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	if len(scs.Named()) > 0 {
-		rootLogger.Error("Dockerfile contains other named stages, this is not supported.")
+		rootLogger.Error("Dockerfile contains other named stages, this is not supported")
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
@@ -112,82 +113,93 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	}
 
-	rootLogger.Info("We are building", "os", osToBuild)
+	rootLogger.Info("building base operating system root file system", "os", osToBuild)
 
 	// we have to build the Docker image, we can use the dependency builder here:
-	builder, builderErr := build.NewDefaultDependencyBuild(scs.Unnamed()[0], tempDirectory, "" /* irrelevant */)
-	if builderErr != nil {
-		rootLogger.Error("Failed creating the builder", "reason", builderErr)
+	client, clientErr := containers.GetDefaultClient()
+	if clientErr != nil {
+		rootLogger.Error("failed creating a Docker client")
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
 
 	tagName := strings.ToLower(utils.RandStringBytes(32)) + ":build"
 
-	builder = builder.WithLogger(rootLogger)
+	rootLogger.Info("building base operating system Docker image", "os", osToBuild)
 
-	if err := builder.ImageBuild(filepath.Dir(commandConfig.Dockerfile), "Dockerfile", tagName); err != nil {
-		rootLogger.Error("Failed building base OS Docker image", "reason", err)
+	if err := containers.ImageBuild(context.Background(), client, rootLogger,
+		filepath.Dir(commandConfig.Dockerfile), "Dockerfile", tagName); err != nil {
+		rootLogger.Error("failed building base OS Docker image", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
 
-	if _, findErr := builder.FindImageIDByTag(tagName); findErr != nil {
+	if _, findErr := containers.FindImageIDByTag(context.Background(), client, tagName); findErr != nil {
 		// be extra careful:
-		rootLogger.Error("Expected docker image not found", "reason", findErr)
+		rootLogger.Error("expected docker image not found", "reason", findErr)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
+
+	rootLogger.Info("image ready, creating EXT4 root file system file", "os", osToBuild)
 
 	rootFSFile := fmt.Sprintf("%s/rootfs.ext4", tempDirectory)
 	if err := createRootFSFile(rootFSFile, commandConfig.FSSizeMBs); err != nil {
-		rootLogger.Error("Failed creating rootfs file", "reason", err)
+		rootLogger.Error("failed creating rootfs file", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
-	rootLogger.Info("EXT4 file created", "path", rootFSFile, "size-mb", commandConfig.FSSizeMBs)
+
+	rootLogger.Info("EXT4 file created, making file system", "path", rootFSFile, "size-mb", commandConfig.FSSizeMBs)
 
 	if err := mkfsExt4(rootFSFile); err != nil {
-		rootLogger.Error("Failed creating EXT4 in rootfs file", "reason", err)
+		rootLogger.Error("failed creating EXT4 in rootfs file", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
-	rootLogger.Info("EXT4 filesystem created", "path", rootFSFile, "size-mb", commandConfig.FSSizeMBs)
+
+	rootLogger.Info("EXT4 file system created, mouting", "path", rootFSFile, "size-mb", commandConfig.FSSizeMBs)
 
 	// create the mount directory:
 	mountDir := filepath.Join(tempDirectory, "mount")
 	mkdirErr := os.Mkdir(mountDir, fs.ModePerm)
 	if mkdirErr != nil {
-		rootLogger.Error("Failed creating EXT4 mount directory", "reason", mkdirErr)
+		rootLogger.Error("failed creating EXT4 mount directory", "reason", mkdirErr)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
 
 	if err := mount(rootFSFile, mountDir); err != nil {
-		rootLogger.Error("Failed mounting rootfs file in mount dir", "reason", err)
+		rootLogger.Error("failed mounting rootfs file in mount dir", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
-	rootLogger.Info("rootfs file mounted in mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
 
-	builder.ImageBaseOSExport(mountDir, tagName)
+	rootLogger.Info("EXT4 file mounted in mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
+
+	if err := containers.ImageBaseOSExport(context.Background(), client, rootLogger, mountDir, tagName); err != nil {
+		rootLogger.Error("failed building root file system for the base OS", "reason", err)
+		// continue to clean up
+	}
+
+	if err := containers.ImageRemove(context.Background(), client, rootLogger, tagName); err != nil {
+		rootLogger.Error("failed post-build image clean up", "reason", err)
+		os.RemoveAll(tempDirectory)
+		os.Exit(1)
+	}
 
 	if err := umount(mountDir); err != nil {
-		rootLogger.Error("Failed unmounting rootfs mount dir", "reason", err)
+		rootLogger.Error("failed unmounting rootfs mount dir", "reason", err)
 		os.RemoveAll(tempDirectory)
 		os.Exit(1)
 	}
-	rootLogger.Info("rootfs file unmounted from mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
 
+	rootLogger.Info("EXT4 file unmounted from mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
+
+	// TODO: move to final real destination
 	_, cmdErr := runShellCommandNoSudo(fmt.Sprintf("mv %s /tmp/rootfs.test", rootFSFile))
 	if cmdErr != nil {
-		rootLogger.Error("Failed moving produced file system", "reason", cmdErr)
-	}
-
-	if err := builder.ImageRemove(tagName); err != nil {
-		rootLogger.Error("Failed post-build image clean up", "reason", err)
-		os.RemoveAll(tempDirectory)
-		os.Exit(1)
+		rootLogger.Error("failed moving produced file system", "reason", cmdErr)
 	}
 
 	os.RemoveAll(tempDirectory)

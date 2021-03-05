@@ -235,16 +235,10 @@ func run(cobraCommand *cobra.Command, _ []string) {
 					cleanup.exec() // manually - defers don't run on os.Exit
 					os.Exit(1)
 				}
-				dependencyBuilder, builderError := build.NewDefaultDependencyBuild(dependencyStage, tempDirectory, filepath.Join(tempDirectory, "sources"))
-				if builderError != nil {
-					rootLogger.Error("failed constructing dependency builder", "stage", stage.Name(), "dependency", dependency, "reason", builderError)
-					cleanup.exec() // manually - defers don't run on os.Exit
-					os.Exit(1)
-				}
+				dependencyBuilder := build.NewDefaultDependencyBuild(dependencyStage, tempDirectory, filepath.Join(tempDirectory, "sources"))
 				resolvedResources, buildError := dependencyBuilder.Build(requiredCopies)
 				if buildError != nil {
 					rootLogger.Error("failed building stage dependency", "stage", stage.Name(), "dependency", dependency, "reason", buildError)
-					dependencyBuilder.Cleanup()
 					cleanup.exec() // manually - defers don't run on os.Exit
 					os.Exit(1)
 				}

@@ -42,11 +42,10 @@ func TestDependencyBuild(t *testing.T) {
 	// The cloned sources reside in .../sources directory, let's write our stage Dockerfile in there
 	sourcesDir := filepath.Join(tempDir, "sources")
 
-	db, err := NewDefaultDependencyBuild(builderStage, tempDir, sourcesDir)
+	db := NewDefaultDependencyBuild(builderStage, tempDir, sourcesDir)
 	if err != nil {
 		t.Fatal("Failed creating dependency builder", err)
 	}
-	defer db.Cleanup()
 
 	copyCommands := []commands.Copy{
 		{
