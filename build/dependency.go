@@ -12,12 +12,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/resources"
 	"github.com/combust-labs/firebuild/build/stage"
 	"github.com/combust-labs/firebuild/build/utils"
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/strslice"
 	docker "github.com/docker/docker/client"
 	dockerArchive "github.com/docker/docker/pkg/archive"
 	"github.com/hashicorp/go-hclog"
@@ -29,11 +33,13 @@ import (
 type DependencyBuild interface {
 	Build([]commands.Copy) ([]resources.ResolvedResource, error)
 	Cleanup()
+	FindImageIDByTag(string) (string, error)
+	ImageBaseOSExport(path, tagName string) error
+	ImageBuild(source, dockerfilePath, tagName string) error
+	ImageRemove(tagName string) error
 	WithLogger(hclog.Logger) DependencyBuild
 	getDependencyDockerfileContent() []string
-	imageBuild(source, dockerfilePath, tagName string) error
 	imageExport(exportsRoot string, externalCopies []commands.Copy, tagName string) ([]resources.ResolvedResource, error)
-	imageRemove(tagName string) error
 }
 
 type defaultDependencyBuild struct {
@@ -83,12 +89,12 @@ func (ddb *defaultDependencyBuild) Build(externalCopies []commands.Copy) ([]reso
 		return emptyResponse, fmt.Errorf("Failed writing stage Dockerfile: %+v", err)
 	}
 
-	if buildError := ddb.imageBuild(ddb.contextDirectory, randFileName, fullTagName); buildError != nil {
+	if buildError := ddb.ImageBuild(ddb.contextDirectory, randFileName, fullTagName); buildError != nil {
 		return emptyResponse, fmt.Errorf("Failed building stage Docker image: %+v", buildError)
 	}
 
 	defer func() {
-		if removeError := ddb.imageRemove(fullTagName); removeError != nil {
+		if removeError := ddb.ImageRemove(fullTagName); removeError != nil {
 			ddb.logger.Error("Failed deleting stage Docker image", "reason", removeError)
 		}
 	}()
@@ -143,7 +149,7 @@ func (ddb *defaultDependencyBuild) getDependencyDockerfileContent() []string {
 	return stringCommands
 }
 
-func (ddb *defaultDependencyBuild) imageBuild(source, dockerfilePath, tagName string) error {
+func (ddb *defaultDependencyBuild) ImageBuild(source, dockerfilePath, tagName string) error {
 
 	if !strings.HasSuffix(source, "/") {
 		source = fmt.Sprintf("%s/", source)
@@ -198,6 +204,83 @@ func (ddb *defaultDependencyBuild) imageBuild(source, dockerfilePath, tagName st
 	}
 
 	// all okay:
+	return nil
+}
+
+func (ddb *defaultDependencyBuild) ImageBaseOSExport(path, tagName string) error {
+
+	// TODO: this stuff needs to be tidied up...
+
+	opLogger := ddb.logger.With("tag-name", tagName)
+
+	opLogger.Debug("exporting Docker container data")
+
+	resp, err := ddb.dockerClient.ContainerCreate(context.Background(), &container.Config{
+		OpenStdin: true,
+		Tty:       true,
+		Cmd:       strslice.StrSlice([]string{"/bin/sh"}),
+		Image:     tagName,
+	}, &container.HostConfig{
+		Mounts: []mount.Mount{
+			{
+				Type:   mount.TypeBind,
+				Source: path,
+				Target: "/export-rootfs",
+			},
+		},
+	}, nil, nil, "")
+	if err != nil {
+		opLogger.Error("failed creating a Docker container using tag name", "reason", err)
+		return err
+	}
+
+	if err := ddb.dockerClient.ContainerStart(context.Background(), resp.ID, types.ContainerStartOptions{}); err != nil {
+		opLogger.Error("failed starting a Docker container using tag name", "container-id", resp.ID, "reason", err)
+		return err
+	}
+
+	commands := []string{
+		// these ones should have an empty directory only:
+		"LIST=\"/boot /opt /proc /run /srv /sys /tmp\"; for d in $(find / -maxdepth 1 -type d); do if echo $LIST | grep -w $d > /dev/null; then mkdir /export-rootfs${d}; fi; done; exit 0",
+		// these are the ones I want to copy, when they don't exist in the list:
+		"LIST=\"/boot /opt /proc /run /srv /sys /tmp\"; for d in $(find / -maxdepth 1 -type d); do if echo $LIST | grep -v -w $d > /dev/null; then case \"$d\" in \"/\") ;; *) tar c \"$d\" | tar x -C /export-rootfs ;; esac; fi; done",
+	}
+
+	for _, command := range commands {
+		execIDResponse, execErr := ddb.dockerClient.ContainerExecCreate(context.Background(), resp.ID, types.ExecConfig{
+			AttachStdout: true,
+			AttachStderr: true,
+			Cmd:          []string{"/bin/sh", "-c", command},
+		})
+		if execErr != nil {
+			opLogger.Error("error creating exec", "container-id", resp.ID, "reason", execErr)
+			return execErr
+		}
+
+		waiter := sync.WaitGroup{}
+		hijackedConn, execAttachErr := ddb.dockerClient.ContainerExecAttach(context.Background(), execIDResponse.ID, types.ExecStartCheck{
+			Tty: true,
+		})
+		if execAttachErr != nil {
+			opLogger.Error("error attaching exec", "container-id", resp.ID, "reason", execAttachErr)
+			return execAttachErr
+		}
+		waiter.Add(1)
+		go func() {
+			for {
+				bs, err := hijackedConn.Reader.ReadBytes('\n')
+				if err != nil && err == io.EOF {
+					break
+				}
+				fmt.Print(" ======================> attach said", string(bs))
+			}
+			hijackedConn.Close()
+			waiter.Done()
+		}()
+
+		waiter.Wait()
+	}
+
 	return nil
 }
 
@@ -264,7 +347,7 @@ func (ddb *defaultDependencyBuild) imageExport(exportsRoot string, externalCopie
 		return resolvedResources, nil // shortcircuit, nothing to look up
 	}
 	opLogger.Debug("exporting Docker stage build image")
-	imageID, err := ddb.findImageIDByTag(tagName)
+	imageID, err := ddb.FindImageIDByTag(tagName)
 	if err != nil {
 		opLogger.Error("failed fetching Docker image ID by tag", "reason", err)
 		return resolvedResources, err
@@ -357,6 +440,7 @@ func (ddb *defaultDependencyBuild) imageExport(exportsRoot string, externalCopie
 								// write chunk to file:
 								targetFile.Write(targetBuf[0:read])
 							}
+							targetFile.Close()
 							opLogger.Debug("target file contents read",
 								"layer", layerHeader.Name,
 								"matched-prefix", opCopy.Source,
@@ -404,10 +488,10 @@ func (ddb *defaultDependencyBuild) imageExport(exportsRoot string, externalCopie
 	return resolvedResources, nil
 }
 
-func (ddb *defaultDependencyBuild) imageRemove(tagName string) error {
+func (ddb *defaultDependencyBuild) ImageRemove(tagName string) error {
 	opLogger := ddb.logger.With("tag-name", tagName)
 	opLogger.Debug("removing Docker stage build image")
-	imageID, err := ddb.findImageIDByTag(tagName)
+	imageID, err := ddb.FindImageIDByTag(tagName)
 	if err != nil {
 		opLogger.Error("failed fetching Docker image ID by tag", tagName, "reason", err)
 		return err
@@ -428,7 +512,7 @@ func (ddb *defaultDependencyBuild) imageRemove(tagName string) error {
 	return nil
 }
 
-func (ddb *defaultDependencyBuild) findImageIDByTag(tagName string) (string, error) {
+func (ddb *defaultDependencyBuild) FindImageIDByTag(tagName string) (string, error) {
 	images, err := ddb.dockerClient.ImageList(context.Background(), types.ImageListOptions{All: true})
 	if err != nil {
 		return "", err
@@ -456,4 +540,10 @@ type dockerErrorLine struct {
 
 type dockerErrorDetail struct {
 	Message string `json:"message"`
+}
+
+type dockerManifest struct {
+	Config   string
+	RepoTags interface{}
+	Layers   []string
 }

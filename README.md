@@ -57,7 +57,7 @@ This example assumes that SSH agent is started and the relevant version SSH key 
 
 ```sh
 sudo bash
-/usr/local/go/bin/go run ./main.go build \
+/usr/local/go/bin/go run ./main.go rootfs \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
@@ -75,7 +75,7 @@ sudo bash
 It's possible to reference a `Dockerfile` residing in the git repository available under a HTTP(s) URL. Here's an example:
 
 ```sh
-/usr/local/go/bin/go run ./main.go build \
+/usr/local/go/bin/go run ./main.go rootfs \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
@@ -155,7 +155,7 @@ The program intends to support multi-stage `Dockerfile` builds. An example with 
 Build v0.2.8 using git repository link, leave SSH access on:
 
 ```sh
-/usr/local/go/bin/go run ./main.go build \
+/usr/local/go/bin/go run ./main.go rootfs \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
@@ -184,7 +184,7 @@ Excluded from the license:
 ### Postgres 13 with Debian Buster slim
 
 ```sh
-/usr/local/go/bin/go run ./main.go build \
+/usr/local/go/bin/go run ./main.go rootfs \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \

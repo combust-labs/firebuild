@@ -1,4 +1,4 @@
-package build
+package rootfs
 
 import (
 	"context"
@@ -34,7 +34,7 @@ type stoppedOK = bool
 
 // Command is the build command declaration.
 var Command = &cobra.Command{
-	Use:   "build",
+	Use:   "rootfs",
 	Short: "Build A VMM root file system from a Docker image",
 	Run:   run,
 	Long:  ``,
@@ -149,7 +149,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	cleanup := &defers{fs: []func(){}}
 	defer cleanup.exec()
 
-	rootLogger := configs.NewLogger("build", logConfig)
+	rootLogger := configs.NewLogger("rootfs", logConfig)
 
 	if commandConfig.Tag == "" {
 		rootLogger.Error("--tag is required")
