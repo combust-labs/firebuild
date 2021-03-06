@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/combust-labs/firebuild/build"
@@ -22,7 +21,6 @@ import (
 	"github.com/combust-labs/firebuild/strategy"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
-	"github.com/gofrs/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -43,55 +41,23 @@ var Command = &cobra.Command{
 }
 
 type buildConfig struct {
-	BinaryFirecracker string
-	BinaryJailer      string
-	ChrootBase        string
-	Dockerfile        string
-
-	EgressNoWait             bool
-	EgressTestTarget         string
-	EgressTestTimeoutSeconds int
-
-	PostBuildCommands []string
-	PreBuildCommands  []string
-	BuildArgs         map[string]string
-
-	JailerGID      int
-	JailerNumeNode int
-	JailerUID      int
-
-	MachineCNINetworkName        string
-	MachineCPUTemplate           string
-	MachineKernelArgs            string
-	MachineRootFSBase            string
-	MachineRootDrivePartUUID     string
-	MachineSSHEnableAgentForward bool
-	MachineSSHPort               int
-	MachineSSHUser               string
-	MachineSSHAuthorizedKeysFile string
-	MachineVMLinux               string
-	NetNS                        string
-
-	ResourcesCPU int64
-	ResourcesMem int64
-
-	ServiceFileInstaller string
-
+	BuildArgs                      map[string]string
+	Dockerfile                     string
+	PostBuildCommands              []string
+	PreBuildCommands               []string
+	ServiceFileInstaller           string
 	ShutdownGracefulTimeoutSeconds int
-
-	Tag string
-}
-
-type cniConfig struct {
-	BinDir   string
-	ConfDir  string
-	CacheDir string
+	Tag                            string
 }
 
 var (
+	cniConfig        = configs.NewCNIConfig()
+	egressTestConfig = configs.NewEgressTestConfig()
+	jailingFcConfig  = configs.NewJailingFirecrackerConfig()
+	logConfig        = configs.NewLogginConfig()
+	machineConfig    = configs.NewMachineConfig()
+
 	commandConfig        = new(buildConfig)
-	commandCniConfig     = new(cniConfig)
-	logConfig            = new(configs.LogConfig)
 	rootFSCopyBufferSize = 4 * 1024 * 1024
 	stoppedGracefully    = stoppedOK(true)
 	stoppedForcefully    = stoppedOK(false)
@@ -99,27 +65,13 @@ var (
 )
 
 func initFlags() {
-	// CNI settings:
-	Command.Flags().StringVar(&commandCniConfig.BinDir, "cni-bin-dir", "/opt/cni/bin", "CNI plugins binaries directory")
-	Command.Flags().StringVar(&commandCniConfig.ConfDir, "cni-conf-dir", "/etc/cni/conf.d", "CNI configuration directory")
-	Command.Flags().StringVar(&commandCniConfig.CacheDir, "cni-cache-dir", "/var/lib/cni", "CNI cache directory")
-	// Log settings:
-	Command.Flags().StringVar(&logConfig.LogLevel, "log-level", "debug", "Log level")
-	Command.Flags().BoolVar(&logConfig.LogAsJSON, "log-as-json", false, "Log as JSON")
-	Command.Flags().BoolVar(&logConfig.LogColor, "log-color", false, "Log in color")
-	Command.Flags().BoolVar(&logConfig.LogForceColor, "log-force-color", false, "Force colored log output")
-	// Egress testing settings:
-	Command.Flags().BoolVar(&commandConfig.EgressNoWait, "egress-no-wait", false, "When set, the build process will not wait for the VMM to have egress confirmed")
-	Command.Flags().StringVar(&commandConfig.EgressTestTarget, "egress-test-target", "1.1.1.1", "Address to use for VMM egress connectivity test; IP address or FQDN, egress is tested with the ping command")
-	Command.Flags().IntVar(&commandConfig.EgressTestTimeoutSeconds, "egress-test-timeout-seconds", 15, "Maxmim amount of time to wait for egress connectivity before failing the build")
-	// Firecracker / Jailer settings:
-	Command.Flags().StringVar(&commandConfig.BinaryFirecracker, "binary-firecracker", "", "Path to the Firecracker binary to use")
-	Command.Flags().StringVar(&commandConfig.BinaryJailer, "binary-jailer", "", "Path to the Firecracker Jailer binary to use")
-	Command.Flags().StringVar(&commandConfig.ChrootBase, "chroot-base", "/srv/jailer", "chroot base directory")
-	Command.Flags().IntVar(&commandConfig.JailerGID, "jailer-gid", 0, "Jailer GID value")
-	Command.Flags().IntVar(&commandConfig.JailerNumeNode, "jailer-numa-node", 0, "Jailer NUMA node")
-	Command.Flags().IntVar(&commandConfig.JailerUID, "jailer-uid", 0, "Jailer UID value")
-	Command.Flags().StringVar(&commandConfig.NetNS, "netns", "/var/lib/netns", "Network namespace")
+
+	Command.Flags().AddFlagSet(cniConfig.FlagSet())
+	Command.Flags().AddFlagSet(egressTestConfig.FlagSet())
+	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
+	Command.Flags().AddFlagSet(logConfig.FlagSet())
+	Command.Flags().AddFlagSet(machineConfig.FlagSet())
+
 	// Bootstrap settings:
 	Command.Flags().StringToStringVar(&commandConfig.BuildArgs, "build-arg", map[string]string{}, "Build arguments, Multiple OK")
 	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
@@ -128,19 +80,6 @@ func initFlags() {
 	Command.Flags().StringVar(&commandConfig.ServiceFileInstaller, "service-file-installer", "", "Local path to the program to upload to the VMM and install the service file")
 	Command.Flags().IntVar(&commandConfig.ShutdownGracefulTimeoutSeconds, "shutdown-graceful-timeout-seconds", 30, "Grafeul shotdown timeout before vmm is stopped forcefully")
 	Command.Flags().StringVar(&commandConfig.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
-	// Machine and resources settings:
-	Command.Flags().StringVar(&commandConfig.MachineCNINetworkName, "machine-cni-network-name", "", "CNI network within which the build should run. It's recommended to use a dedicated network for build process")
-	Command.Flags().StringVar(&commandConfig.MachineCPUTemplate, "machine-cpu-template", "", "CPU template (empty, C2 or T3)")
-	Command.Flags().StringVar(&commandConfig.MachineKernelArgs, "machine-kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
-	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside, required, can't be /")
-	Command.Flags().StringVar(&commandConfig.MachineRootDrivePartUUID, "machine-root-drive-partuuid", "", "Root drive part UUID")
-	Command.Flags().BoolVar(&commandConfig.MachineSSHEnableAgentForward, "machine-ssh-enable-agent-forward", false, "If set, enables SSH agent forward")
-	Command.Flags().IntVar(&commandConfig.MachineSSHPort, "machine-ssh-port", 22, "SSH port")
-	Command.Flags().StringVar(&commandConfig.MachineSSHUser, "machine-ssh-user", "", "SSH user")
-	Command.Flags().StringVar(&commandConfig.MachineSSHUser, "machine-ssh-authorized-keys-file", "", "SSH user")
-	Command.Flags().StringVar(&commandConfig.MachineVMLinux, "machine-vmlinux", "", "Kernel file path")
-	Command.Flags().Int64Var(&commandConfig.ResourcesCPU, "resources-cpu", 1, "Number of CPU for the build VMM")
-	Command.Flags().Int64Var(&commandConfig.ResourcesMem, "resources-mem", 128, "Amount of memory for the VMM")
 }
 
 func init() {
@@ -152,9 +91,9 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	cleanup := &defers{fs: []func(){}}
 	defer cleanup.exec()
 
-	rootLogger := configs.NewLogger("rootfs", logConfig)
+	rootLogger := logConfig.NewLogger("rootfs")
 
-	if commandConfig.MachineRootFSBase == "" || commandConfig.MachineRootFSBase == "/" {
+	if machineConfig.MachineRootFSBase == "" || machineConfig.MachineRootFSBase == "/" {
 		rootLogger.Error("--machine-rootfs-base is empty or /")
 		os.Exit(1)
 	}
@@ -229,7 +168,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	})
 
 	// TODO: check that it exists and is regular file
-	sourceRootfs := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), "root.ext4")
+	sourceRootfs := filepath.Join(machineConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), "root.ext4")
 	buildRootfs := filepath.Join(tempDirectory, "rootfs")
 
 	// which resources from dependencies do we need:
@@ -268,11 +207,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	}
 
-	vmmID := strings.ReplaceAll(uuid.Must(uuid.NewV4()).String(), "-", "")
-
-	jailDirectory := filepath.Join(commandConfig.ChrootBase,
-		filepath.Base(commandConfig.BinaryFirecracker), vmmID)
-
 	if err := copyFile(sourceRootfs, buildRootfs, rootFSCopyBufferSize); err != nil {
 		rootLogger.Error("failed copying requested rootfs to temp build location",
 			"source", sourceRootfs,
@@ -284,24 +218,24 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vethIfaceName := getRandomVethName()
 
-	vmmLogger := rootLogger.With("vmm-id", vmmID, "veth-name", vethIfaceName)
+	vmmLogger := rootLogger.With("vmm-id", jailingFcConfig.VMMID(), "veth-name", vethIfaceName)
 
 	vmmLogger.Info("buildiing VMM",
 		"dockerfile", commandConfig.Dockerfile,
 		"source-rootfs", buildRootfs,
 		"origin-rootfs", sourceRootfs,
-		"jail", jailDirectory)
+		"jail", jailingFcConfig.JailerChrootDirectory())
 
 	cleanup.add(func() {
 		vmmLogger.Info("cleaning up jail directory")
-		status := os.RemoveAll(jailDirectory)
+		status := os.RemoveAll(jailingFcConfig.JailerChrootDirectory())
 		vmmLogger.Info("jail directory removal status", "error", status)
 	})
 
 	strategyConfig := &strategy.SSHKeyInjectingHandlerConfig{
-		Chroot:         jailDirectory,
+		Chroot:         jailingFcConfig.JailerChrootDirectory(),
 		RootfsFileName: filepath.Base(buildRootfs),
-		SSHUser:        commandConfig.MachineSSHUser,
+		SSHUser:        machineConfig.MachineSSHUser,
 		PublicKeys: []ssh.PublicKey{
 			sshPublicKey,
 		},
@@ -311,7 +245,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		return strategy.HandlerWithRequirement{
 			AppendAfter: firecracker.CreateLogFilesHandlerName,
 			// replicate what firecracker.NaiveChrootStrategy is doing...
-			Handler: firecracker.LinkFilesHandler(filepath.Base(commandConfig.MachineVMLinux)),
+			Handler: firecracker.LinkFilesHandler(filepath.Base(machineConfig.MachineVMLinux)),
 		}
 	})
 
@@ -323,39 +257,39 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		LogLevel:        "debug", // CONSIDER: make this configurable
 		MetricsFifo:     "",      // not configurable for the build machines
 		FifoLogWriter:   fifo,
-		KernelImagePath: commandConfig.MachineVMLinux,
-		KernelArgs:      commandConfig.MachineKernelArgs,
-		NetNS:           commandConfig.NetNS,
+		KernelImagePath: machineConfig.MachineVMLinux,
+		KernelArgs:      machineConfig.MachineKernelArgs,
+		NetNS:           jailingFcConfig.NetNS,
 		Drives: []models.Drive{
 			{
 				DriveID:      firecracker.String("1"),
 				PathOnHost:   firecracker.String(buildRootfs),
 				IsRootDevice: firecracker.Bool(true),
 				IsReadOnly:   firecracker.Bool(false),
-				Partuuid:     commandConfig.MachineRootDrivePartUUID,
+				Partuuid:     machineConfig.MachineRootDrivePartUUID,
 			},
 		},
 		NetworkInterfaces: []firecracker.NetworkInterface{{
 			CNIConfiguration: &firecracker.CNIConfiguration{
-				NetworkName: commandConfig.MachineCNINetworkName,
+				NetworkName: machineConfig.MachineCNINetworkName,
 				IfName:      vethIfaceName,
 			},
 		}},
 		VsockDevices: []firecracker.VsockDevice{},
 		MachineCfg: models.MachineConfiguration{
-			VcpuCount:   firecracker.Int64(commandConfig.ResourcesCPU),
-			CPUTemplate: models.CPUTemplate(commandConfig.MachineCPUTemplate),
+			VcpuCount:   firecracker.Int64(machineConfig.ResourcesCPU),
+			CPUTemplate: models.CPUTemplate(machineConfig.MachineCPUTemplate),
 			HtEnabled:   firecracker.Bool(false),
-			MemSizeMib:  firecracker.Int64(commandConfig.ResourcesMem),
+			MemSizeMib:  firecracker.Int64(machineConfig.ResourcesMem),
 		},
 		JailerCfg: &firecracker.JailerConfig{
-			GID:            firecracker.Int(commandConfig.JailerGID),
-			UID:            firecracker.Int(commandConfig.JailerUID),
-			ID:             vmmID,
-			NumaNode:       firecracker.Int(commandConfig.JailerNumeNode),
-			ExecFile:       commandConfig.BinaryFirecracker,
-			JailerBinary:   commandConfig.BinaryJailer,
-			ChrootBaseDir:  commandConfig.ChrootBase,
+			GID:            firecracker.Int(jailingFcConfig.JailerGID),
+			UID:            firecracker.Int(jailingFcConfig.JailerUID),
+			ID:             jailingFcConfig.VMMID(),
+			NumaNode:       firecracker.Int(jailingFcConfig.JailerNumeNode),
+			ExecFile:       jailingFcConfig.BinaryFirecracker,
+			JailerBinary:   jailingFcConfig.BinaryJailer,
+			ChrootBaseDir:  jailingFcConfig.JailerChrootDirectory(),
 			Daemonize:      false,
 			ChrootStrategy: strategy,
 			Stdout:         os.Stdout,
@@ -364,7 +298,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			// and it messes up the terminal
 			Stdin: nil,
 		},
-		VMID: vmmID,
+		VMID: jailingFcConfig.VMMID(),
 	}
 
 	vmmCtx, vmmCancel := context.WithCancel(context.Background())
@@ -386,10 +320,10 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
 		SSHPrivateKey:      *rsaPrivateKey,
-		SSHUsername:        commandConfig.MachineSSHUser,
+		SSHUsername:        machineConfig.MachineSSHUser,
 		IP:                 ifaceStaticConfig.IPConfiguration.IPAddr.IP,
-		Port:               commandConfig.MachineSSHPort,
-		EnableAgentForward: commandConfig.MachineSSHEnableAgentForward,
+		Port:               machineConfig.MachineSSHPort,
+		EnableAgentForward: machineConfig.MachineSSHEnableAgentForward,
 	}, vmmLogger.Named("remote-client"))
 
 	if remoteErr != nil {
@@ -400,10 +334,10 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmLogger.Info("Connected via SSH")
 
-	if !commandConfig.EgressNoWait {
-		egressCtx, egressWaitCancelFunc := context.WithTimeout(vmmCtx, time.Second*time.Duration(commandConfig.EgressTestTimeoutSeconds))
+	if !egressTestConfig.EgressNoWait {
+		egressCtx, egressWaitCancelFunc := context.WithTimeout(vmmCtx, time.Second*time.Duration(egressTestConfig.EgressTestTimeoutSeconds))
 		defer egressWaitCancelFunc()
-		if err := remoteClient.WaitForEgress(egressCtx, commandConfig.EgressTestTarget); err != nil {
+		if err := remoteClient.WaitForEgress(egressCtx, egressTestConfig.EgressTestTarget); err != nil {
 			stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
 			vmmLogger.Error("Did not get egress connectivity within a timeout", "reason", err)
 			return
@@ -453,7 +387,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	fsFileName := filepath.Base(buildRootfs)
-	fileSystemTargetDirectory := filepath.Join(commandConfig.MachineRootFSBase, "_builds", org, name, version)
+	fileSystemTargetDirectory := filepath.Join(machineConfig.MachineRootFSBase, "_builds", org, name, version)
 	fileSystemTarget := filepath.Join(fileSystemTargetDirectory, fsFileName)
 
 	if err := os.MkdirAll(filepath.Dir(fileSystemTarget), 0644); err != nil {
@@ -462,7 +396,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		return
 	}
 
-	if copyErr := copyFile(filepath.Join(jailDirectory, "root", fsFileName), fileSystemTarget, 4*1024*1024); copyErr != nil {
+	if copyErr := copyFile(filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root", fsFileName), fileSystemTarget, 4*1024*1024); copyErr != nil {
 		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
 		vmmLogger.Error("Failed copying built file", "tag", commandConfig.Tag)
 		return
@@ -474,7 +408,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		"ports":          buildContext.ExposedPorts(),
 		"created-at-utc": time.Now().UTC().Unix(),
 		"build-context": map[string]interface{}{
-			"cni-config": &commandCniConfig,
+			"cni-config": cniConfig,
 			"config":     &commandConfig,
 		},
 	}
@@ -536,10 +470,10 @@ func stopVMM(ctx context.Context, machine *firecracker.Machine, vethIfaceName st
 
 	logger.Info("Cleaning up CNI network...")
 
-	cniCleanupErr := cleanupCNINetwork(commandCniConfig,
-		commandConfig.NetNS,
+	cniCleanupErr := cleanupCNINetwork(cniConfig,
+		machine.Cfg.NetNS,
 		machine.Cfg.VMID,
-		commandConfig.MachineCNINetworkName,
+		machineConfig.MachineCNINetworkName,
 		vethIfaceName)
 
 	logger.Info("CNI network cleanup status", "error", cniCleanupErr)
@@ -588,7 +522,7 @@ func copyFile(source, dest string, bufferSize int) error {
 	return nil
 }
 
-func cleanupCNINetwork(cniConfig *cniConfig, netNs, vmmID, networkName, ifname string) error {
+func cleanupCNINetwork(cniConfig *configs.CNIConfig, netNs, vmmID, networkName, ifname string) error {
 	cniPlugin := libcni.NewCNIConfigWithCacheDir([]string{cniConfig.BinDir}, cniConfig.CacheDir, nil)
 	networkConfig, err := libcni.LoadConfList(cniConfig.ConfDir, networkName)
 	if err != nil {

@@ -9,12 +9,11 @@ require (
 	github.com/go-git/go-git/v5 v5.2.0
 	github.com/gofrs/uuid v4.0.0+incompatible
 	github.com/hashicorp/go-hclog v0.15.0
-	github.com/lunixbochs/struc v0.0.0-20200707160740-784aaebc1d40 // indirect
 	github.com/moby/buildkit v0.8.1
-	github.com/nerd2/gexto v0.0.0-20190529073929-39468ec063f6
 	github.com/pkg/sftp v1.12.0
 	github.com/sirupsen/logrus v1.7.0
 	github.com/spf13/cobra v1.0.0
+	github.com/spf13/pflag v1.0.5
 	golang.org/x/crypto v0.0.0-20201117144127-c1f2f97bffc9
 	golang.org/x/sys v0.0.0-20210227040730-b0d1d43c014d // indirect
 )

@@ -39,18 +39,15 @@ type buildConfig struct {
 
 var (
 	commandConfig = new(buildConfig)
-	logConfig     = new(configs.LogConfig)
+	logConfig     = configs.NewLogginConfig()
 )
 
 func initFlags() {
 	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Full path to the base OS Dockerfile")
 	Command.Flags().IntVar(&commandConfig.FSSizeMBs, "filesystem-size-mbs", 500, "File system size in megabytes")
 	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside, required, can't be /")
-	// Log settings:
-	Command.Flags().StringVar(&logConfig.LogLevel, "log-level", "debug", "Log level")
-	Command.Flags().BoolVar(&logConfig.LogAsJSON, "log-as-json", false, "Log as JSON")
-	Command.Flags().BoolVar(&logConfig.LogColor, "log-color", false, "Log in color")
-	Command.Flags().BoolVar(&logConfig.LogForceColor, "log-force-color", false, "Force colored log output")
+
+	Command.Flags().AddFlagSet(logConfig.FlagSet())
 }
 
 func init() {
@@ -59,7 +56,7 @@ func init() {
 
 func run(cobraCommand *cobra.Command, _ []string) {
 
-	rootLogger := configs.NewLogger("baseos", logConfig)
+	rootLogger := logConfig.NewLogger("baseos")
 
 	if commandConfig.MachineRootFSBase == "" || commandConfig.MachineRootFSBase == "/" {
 		rootLogger.Error("--machine-rootfs-base is empty or /")
