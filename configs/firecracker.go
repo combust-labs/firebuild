@@ -1,10 +1,14 @@
 package configs
 
 import (
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/firecracker-microvm/firecracker-go-sdk"
+	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/gofrs/uuid"
 	"github.com/spf13/pflag"
 )
@@ -63,5 +67,104 @@ func (c *JailingFirecrackerConfig) ensure() *JailingFirecrackerConfig {
 	if c.vmmID == "" {
 		c.vmmID = strings.ReplaceAll(uuid.Must(uuid.NewV4()).String(), "-", "")
 	}
+	return c
+}
+
+type FcConfigProvider interface {
+	ToSDKConfig() firecracker.Config
+	WithHandlersAdapter(firecracker.HandlersAdapter) FcConfigProvider
+	WithRootFsHostPath(string) FcConfigProvider
+	WithVethIfaceName(string) FcConfigProvider
+}
+
+type defaultFcConfigProvider struct {
+	jailingFcConfig *JailingFirecrackerConfig
+	machineConfig   *MachineConfig
+
+	fcStrategy     firecracker.HandlersAdapter
+	rootFsHostPath string
+	vethIfaceName  string
+}
+
+func NewFcConfigProvider(jailingFcConfig *JailingFirecrackerConfig, machineConfig *MachineConfig) FcConfigProvider {
+	return &defaultFcConfigProvider{
+		jailingFcConfig: jailingFcConfig,
+		machineConfig:   machineConfig,
+		vethIfaceName:   "veth0",
+	}
+}
+
+func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
+
+	var fifo io.WriteCloser // TODO: do it like firectl does it
+
+	return firecracker.Config{
+		SocketPath:      "",      // given via Jailer
+		LogFifo:         "",      // CONSIDER: make this configurable
+		LogLevel:        "debug", // CONSIDER: make this configurable
+		MetricsFifo:     "",      // not configurable for the build machines
+		FifoLogWriter:   fifo,
+		KernelImagePath: c.machineConfig.MachineVMLinux,
+		KernelArgs:      c.machineConfig.MachineKernelArgs,
+		NetNS:           c.jailingFcConfig.NetNS,
+		Drives: []models.Drive{
+			{
+				DriveID:      firecracker.String("1"),
+				PathOnHost:   firecracker.String(c.rootFsHostPath),
+				IsRootDevice: firecracker.Bool(true),
+				IsReadOnly:   firecracker.Bool(false),
+				Partuuid:     c.machineConfig.MachineRootDrivePartUUID,
+			},
+		},
+		NetworkInterfaces: []firecracker.NetworkInterface{{
+			CNIConfiguration: &firecracker.CNIConfiguration{
+				NetworkName: c.machineConfig.MachineCNINetworkName,
+				IfName:      c.vethIfaceName,
+			},
+		}},
+		VsockDevices: []firecracker.VsockDevice{},
+		MachineCfg: models.MachineConfiguration{
+			VcpuCount:   firecracker.Int64(c.machineConfig.ResourcesCPU),
+			CPUTemplate: models.CPUTemplate(c.machineConfig.MachineCPUTemplate),
+			HtEnabled:   firecracker.Bool(false),
+			MemSizeMib:  firecracker.Int64(c.machineConfig.ResourcesMem),
+		},
+		JailerCfg: &firecracker.JailerConfig{
+			GID:           firecracker.Int(c.jailingFcConfig.JailerGID),
+			UID:           firecracker.Int(c.jailingFcConfig.JailerUID),
+			ID:            c.jailingFcConfig.VMMID(),
+			NumaNode:      firecracker.Int(c.jailingFcConfig.JailerNumeNode),
+			ExecFile:      c.jailingFcConfig.BinaryFirecracker,
+			JailerBinary:  c.jailingFcConfig.BinaryJailer,
+			ChrootBaseDir: c.jailingFcConfig.JailerChrootDirectory(),
+			Daemonize:     false,
+			ChrootStrategy: func() firecracker.HandlersAdapter {
+				if c.fcStrategy == nil {
+					return firecracker.NewNaiveChrootStrategy(c.machineConfig.MachineVMLinux)
+				}
+				return c.fcStrategy
+			}(),
+			Stdout: os.Stdout,
+			Stderr: os.Stderr,
+			// do not pass stdin because the build VMM does not require input
+			// and it messes up the terminal
+			Stdin: nil,
+		},
+		VMID: c.jailingFcConfig.VMMID(),
+	}
+}
+
+func (c *defaultFcConfigProvider) WithHandlersAdapter(input firecracker.HandlersAdapter) FcConfigProvider {
+	c.fcStrategy = input
+	return c
+}
+
+func (c *defaultFcConfigProvider) WithRootFsHostPath(input string) FcConfigProvider {
+	c.rootFsHostPath = input
+	return c
+}
+
+func (c *defaultFcConfigProvider) WithVethIfaceName(input string) FcConfigProvider {
+	c.vethIfaceName = input
 	return c
 }

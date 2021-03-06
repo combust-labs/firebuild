@@ -20,7 +20,6 @@ import (
 	"github.com/combust-labs/firebuild/remote"
 	"github.com/combust-labs/firebuild/strategy"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
-	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -249,57 +248,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	})
 
-	var fifo io.WriteCloser // TODO: do it like firectl does it
-
-	fcConfig := firecracker.Config{
-		SocketPath:      "",      // given via Jailer
-		LogFifo:         "",      // CONSIDER: make this configurable
-		LogLevel:        "debug", // CONSIDER: make this configurable
-		MetricsFifo:     "",      // not configurable for the build machines
-		FifoLogWriter:   fifo,
-		KernelImagePath: machineConfig.MachineVMLinux,
-		KernelArgs:      machineConfig.MachineKernelArgs,
-		NetNS:           jailingFcConfig.NetNS,
-		Drives: []models.Drive{
-			{
-				DriveID:      firecracker.String("1"),
-				PathOnHost:   firecracker.String(buildRootfs),
-				IsRootDevice: firecracker.Bool(true),
-				IsReadOnly:   firecracker.Bool(false),
-				Partuuid:     machineConfig.MachineRootDrivePartUUID,
-			},
-		},
-		NetworkInterfaces: []firecracker.NetworkInterface{{
-			CNIConfiguration: &firecracker.CNIConfiguration{
-				NetworkName: machineConfig.MachineCNINetworkName,
-				IfName:      vethIfaceName,
-			},
-		}},
-		VsockDevices: []firecracker.VsockDevice{},
-		MachineCfg: models.MachineConfiguration{
-			VcpuCount:   firecracker.Int64(machineConfig.ResourcesCPU),
-			CPUTemplate: models.CPUTemplate(machineConfig.MachineCPUTemplate),
-			HtEnabled:   firecracker.Bool(false),
-			MemSizeMib:  firecracker.Int64(machineConfig.ResourcesMem),
-		},
-		JailerCfg: &firecracker.JailerConfig{
-			GID:            firecracker.Int(jailingFcConfig.JailerGID),
-			UID:            firecracker.Int(jailingFcConfig.JailerUID),
-			ID:             jailingFcConfig.VMMID(),
-			NumaNode:       firecracker.Int(jailingFcConfig.JailerNumeNode),
-			ExecFile:       jailingFcConfig.BinaryFirecracker,
-			JailerBinary:   jailingFcConfig.BinaryJailer,
-			ChrootBaseDir:  jailingFcConfig.JailerChrootDirectory(),
-			Daemonize:      false,
-			ChrootStrategy: strategy,
-			Stdout:         os.Stdout,
-			Stderr:         os.Stderr,
-			// do not pass stdin because the build VMM does not require input
-			// and it messes up the terminal
-			Stdin: nil,
-		},
-		VMID: jailingFcConfig.VMMID(),
-	}
+	fcConfig := configs.NewFcConfigProvider(jailingFcConfig, machineConfig).
+		WithHandlersAdapter(strategy).
+		WithVethIfaceName(vethIfaceName).
+		WithRootFsHostPath(buildRootfs).
+		ToSDKConfig()
 
 	vmmCtx, vmmCancel := context.WithCancel(context.Background())
 	cleanup.add(func() {
