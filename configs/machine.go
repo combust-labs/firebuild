@@ -1,10 +1,15 @@
 package configs
 
-import "github.com/spf13/pflag"
+import (
+	"fmt"
+
+	"github.com/spf13/pflag"
+)
 
 // MachineConfig provides options for the machine agress test.
 type MachineConfig struct {
 	flagBase
+	ValidatingConfig
 
 	MachineCNINetworkName        string
 	MachineCPUTemplate           string
@@ -18,6 +23,8 @@ type MachineConfig struct {
 	MachineVMLinux               string
 	ResourcesCPU                 int64
 	ResourcesMem                 int64
+
+	ShutdownGracefulTimeoutSeconds int
 }
 
 // NewMachineConfig returns a new instance of the configuration.
@@ -40,6 +47,15 @@ func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.MachineVMLinux, "machine-vmlinux", "", "Kernel file path")
 		c.flagSet.Int64Var(&c.ResourcesCPU, "resources-cpu", 1, "Number of CPU for the build VMM")
 		c.flagSet.Int64Var(&c.ResourcesMem, "resources-mem", 128, "Amount of memory for the VMM")
+		c.flagSet.IntVar(&c.ShutdownGracefulTimeoutSeconds, "shutdown-graceful-timeout-seconds", 30, "Grafeul shotdown timeout before vmm is stopped forcefully")
 	}
 	return c.flagSet
+}
+
+// Validate validates the correctness of the configuration.
+func (c *MachineConfig) Validate() error {
+	if c.MachineRootFSBase == "" || c.MachineRootFSBase == "/" {
+		return fmt.Errorf("--machine-rootfs-base is empty or /")
+	}
+	return nil
 }

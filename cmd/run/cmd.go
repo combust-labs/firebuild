@@ -1,6 +1,8 @@
 package run
 
 import (
+	"os"
+
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/spf13/cobra"
 )
@@ -34,5 +36,12 @@ func init() {
 }
 
 func run(cobraCommand *cobra.Command, _ []string) {
+
+	rootLogger := logConfig.NewLogger("run")
+
+	if err := machineConfig.Validate(); err != nil {
+		rootLogger.Error("Machine configuration is invalid", "reason", err)
+		os.Exit(1)
+	}
 
 }

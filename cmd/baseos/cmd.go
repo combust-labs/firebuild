@@ -12,9 +12,9 @@ import (
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/reader"
 	"github.com/combust-labs/firebuild/build/stage"
-	"github.com/combust-labs/firebuild/build/utils"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/containers"
+	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/spf13/cobra"
 )
 

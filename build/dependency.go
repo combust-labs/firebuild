@@ -11,8 +11,8 @@ import (
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/resources"
 	"github.com/combust-labs/firebuild/build/stage"
-	"github.com/combust-labs/firebuild/build/utils"
 	"github.com/combust-labs/firebuild/containers"
+	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/hashicorp/go-hclog"
 )
 

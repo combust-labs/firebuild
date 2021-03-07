@@ -2,11 +2,40 @@ package utils
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
 )
+
+// CopyFile copies a file at the source path to the dest path.
+func CopyFile(source, dest string, bufferSize int) error {
+	sourceFile, err := os.Open(source)
+	if err != nil {
+		return nil
+	}
+	defer sourceFile.Close()
+	destFile, err := os.Create(dest)
+	if err != nil {
+		return nil
+	}
+	defer destFile.Close()
+	buf := make([]byte, bufferSize)
+	for {
+		n, err := sourceFile.Read(buf)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if n == 0 {
+			break
+		}
+		if _, err := destFile.Write(buf[:n]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // CreateRootFSFile uses dd to create a rootfs file of given size at a given path.
 func CreateRootFSFile(path string, size int) error {

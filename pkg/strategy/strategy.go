@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/combust-labs/firebuild/build/utils"
+	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
 
@@ -33,6 +33,10 @@ func NewSSHKeyInjectingHandler(logger hclog.Logger, config *SSHKeyInjectingHandl
 	return firecracker.Handler{
 		Name: SSHKeyInjectingHandlerName,
 		Fn: func(ctx context.Context, m *firecracker.Machine) error {
+
+			if len(config.PublicKeys) == 0 {
+				return nil
+			}
 
 			// we have to make sure that we have the file for the rootfs under
 			// chroot/root/fs-file-name

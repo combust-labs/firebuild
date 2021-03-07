@@ -20,3 +20,7 @@ func (fb *flagBase) initFlagSet() bool {
 	}
 	return false
 }
+
+type ValidatingConfig interface {
+	Validate() error
+}

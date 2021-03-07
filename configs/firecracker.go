@@ -1,6 +1,7 @@
 package configs
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,10 +14,13 @@ import (
 	"github.com/spf13/pflag"
 )
 
+const DefaultVethIfaceName = "veth0"
+
 // JailingFirecrackerConfig represents firecracker specific configuration options.
 type JailingFirecrackerConfig struct {
 	sync.Mutex
 	flagBase
+	ValidatingConfig
 
 	BinaryFirecracker string
 	BinaryJailer      string
@@ -54,13 +58,21 @@ func (c *JailingFirecrackerConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.StringVar(&c.BinaryFirecracker, "binary-firecracker", "", "Path to the Firecracker binary to use")
 		c.flagSet.StringVar(&c.BinaryJailer, "binary-jailer", "", "Path to the Firecracker Jailer binary to use")
-		c.flagSet.StringVar(&c.ChrootBase, "chroot-base", "/srv/jailer", "chroot base directory")
+		c.flagSet.StringVar(&c.ChrootBase, "chroot-base", "/srv/jailer", "chroot base directory; can't be empty or /")
 		c.flagSet.IntVar(&c.JailerGID, "jailer-gid", 0, "Jailer GID value")
 		c.flagSet.IntVar(&c.JailerNumeNode, "jailer-numa-node", 0, "Jailer NUMA node")
 		c.flagSet.IntVar(&c.JailerUID, "jailer-uid", 0, "Jailer UID value")
 		c.flagSet.StringVar(&c.NetNS, "netns", "/var/lib/netns", "Network namespace")
 	}
 	return c.flagSet
+}
+
+// Validate validates the correctness of the configuration.
+func (c *JailingFirecrackerConfig) Validate() error {
+	if c.ChrootBase == "" || c.ChrootBase == "/" {
+		return fmt.Errorf("--chroot-base must be set to value other than empty and /")
+	}
+	return nil
 }
 
 func (c *JailingFirecrackerConfig) ensure() *JailingFirecrackerConfig {
@@ -90,7 +102,7 @@ func NewFcConfigProvider(jailingFcConfig *JailingFirecrackerConfig, machineConfi
 	return &defaultFcConfigProvider{
 		jailingFcConfig: jailingFcConfig,
 		machineConfig:   machineConfig,
-		vethIfaceName:   "veth0",
+		vethIfaceName:   DefaultVethIfaceName,
 	}
 }
 
@@ -136,11 +148,11 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 			NumaNode:      firecracker.Int(c.jailingFcConfig.JailerNumeNode),
 			ExecFile:      c.jailingFcConfig.BinaryFirecracker,
 			JailerBinary:  c.jailingFcConfig.BinaryJailer,
-			ChrootBaseDir: c.jailingFcConfig.JailerChrootDirectory(),
+			ChrootBaseDir: c.jailingFcConfig.ChrootBase,
 			Daemonize:     false,
 			ChrootStrategy: func() firecracker.HandlersAdapter {
 				if c.fcStrategy == nil {
-					return firecracker.NewNaiveChrootStrategy(c.machineConfig.MachineVMLinux)
+					return firecracker.NewNaiveChrootStrategy(filepath.Base(c.machineConfig.MachineVMLinux))
 				}
 				return c.fcStrategy
 			}(),

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -15,21 +14,15 @@ import (
 	"github.com/combust-labs/firebuild/build/reader"
 	"github.com/combust-labs/firebuild/build/resources"
 	"github.com/combust-labs/firebuild/build/stage"
-	"github.com/combust-labs/firebuild/build/utils"
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/strategy"
+	"github.com/combust-labs/firebuild/pkg/utils"
+	"github.com/combust-labs/firebuild/pkg/vmm"
 	"github.com/combust-labs/firebuild/remote"
-	"github.com/combust-labs/firebuild/strategy"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
-	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
-
-	"github.com/sirupsen/logrus"
-
-	"github.com/containernetworking/cni/libcni"
 )
-
-type stoppedOK = bool
 
 // Command is the build command declaration.
 var Command = &cobra.Command{
@@ -40,13 +33,12 @@ var Command = &cobra.Command{
 }
 
 type buildConfig struct {
-	BuildArgs                      map[string]string
-	Dockerfile                     string
-	PostBuildCommands              []string
-	PreBuildCommands               []string
-	ServiceFileInstaller           string
-	ShutdownGracefulTimeoutSeconds int
-	Tag                            string
+	BuildArgs            map[string]string
+	Dockerfile           string
+	PostBuildCommands    []string
+	PreBuildCommands     []string
+	ServiceFileInstaller string
+	Tag                  string
 }
 
 var (
@@ -58,8 +50,6 @@ var (
 
 	commandConfig        = new(buildConfig)
 	rootFSCopyBufferSize = 4 * 1024 * 1024
-	stoppedGracefully    = stoppedOK(true)
-	stoppedForcefully    = stoppedOK(false)
 	rsaKeySize           = 4096
 )
 
@@ -77,7 +67,6 @@ func initFlags() {
 	Command.Flags().StringArrayVar(&commandConfig.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
 	Command.Flags().StringArrayVar(&commandConfig.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
 	Command.Flags().StringVar(&commandConfig.ServiceFileInstaller, "service-file-installer", "", "Local path to the program to upload to the VMM and install the service file")
-	Command.Flags().IntVar(&commandConfig.ShutdownGracefulTimeoutSeconds, "shutdown-graceful-timeout-seconds", 30, "Grafeul shotdown timeout before vmm is stopped forcefully")
 	Command.Flags().StringVar(&commandConfig.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
 }
 
@@ -87,14 +76,21 @@ func init() {
 
 func run(cobraCommand *cobra.Command, _ []string) {
 
-	cleanup := &defers{fs: []func(){}}
-	defer cleanup.exec()
+	cleanup := utils.NewDefers()
+	defer cleanup.CallAll()
 
 	rootLogger := logConfig.NewLogger("rootfs")
 
-	if machineConfig.MachineRootFSBase == "" || machineConfig.MachineRootFSBase == "/" {
-		rootLogger.Error("--machine-rootfs-base is empty or /")
-		os.Exit(1)
+	validatingConfigs := []configs.ValidatingConfig{
+		jailingFcConfig,
+		machineConfig,
+	}
+
+	for _, validatingConfig := range validatingConfigs {
+		if err := validatingConfig.Validate(); err != nil {
+			rootLogger.Error("Configuration is invalid", "reason", err)
+			os.Exit(1)
+		}
 	}
 
 	if commandConfig.Tag == "" {
@@ -112,6 +108,28 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		rootLogger.Error("Failed creating temporary build directory", "reason", err)
 		os.Exit(1)
 	}
+
+	cleanup.Add(func() {
+		rootLogger.Info("cleaning up temp build directory")
+		if err := os.RemoveAll(tempDirectory); err != nil {
+			rootLogger.Info("temp build directory removal status", "error", err)
+		}
+	})
+
+	rsaPrivateKey, rsaPrivateKeyErr := utils.GenerateRSAPrivateKey(rsaKeySize)
+	if rsaPrivateKeyErr != nil {
+		rootLogger.Error("failed generating private key for the VMM build", "reason", rsaPrivateKeyErr)
+		cleanup.CallAll() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+	sshPublicKey, sshPublicKeyErr := utils.GetSSHKey(rsaPrivateKey)
+	if sshPublicKeyErr != nil {
+		rootLogger.Error("failed generating public SSH key from the private RSA key", "reason", sshPublicKeyErr)
+		cleanup.CallAll() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+
+	// -- Command specific:
 
 	readResults, err := reader.ReadFromString(commandConfig.Dockerfile, tempDirectory)
 	if err != nil {
@@ -133,20 +151,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	mainStage := unnamed[0]
 	if !mainStage.IsValid() {
 		rootLogger.Error("main build stage invalid: no base to build from")
-		cleanup.exec() // manually - defers don't run on os.Exit
-		os.Exit(1)
-	}
-
-	rsaPrivateKey, rsaPrivateKeyErr := utils.GenerateRSAPrivateKey(rsaKeySize)
-	if rsaPrivateKeyErr != nil {
-		rootLogger.Error("failed generating private key for the VMM build", "reason", rsaPrivateKeyErr)
-		cleanup.exec() // manually - defers don't run on os.Exit
-		os.Exit(1)
-	}
-	sshPublicKey, sshPublicKeyErr := utils.GetSSHKey(rsaPrivateKey)
-	if sshPublicKeyErr != nil {
-		rootLogger.Error("failed generating public SSH key from the private RSA key", "reason", sshPublicKeyErr)
-		cleanup.exec() // manually - defers don't run on os.Exit
+		cleanup.CallAll() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
 
@@ -154,17 +159,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	buildContext := build.NewDefaultBuild()
 	if err := buildContext.AddInstructions(unnamed[0].Commands()...); err != nil {
 		rootLogger.Error("commands could not be processed", "reason", err)
-		cleanup.exec() // manually - defers don't run on os.Exit
+		cleanup.CallAll() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
 
 	structuredBase := buildContext.From().ToStructuredFrom()
-
-	cleanup.add(func() {
-		rootLogger.Info("cleaning up temp build directory")
-		status := os.RemoveAll(tempDirectory)
-		rootLogger.Info("temp build directory removal status", "error", status)
-	})
 
 	// TODO: check that it exists and is regular file
 	sourceRootfs := filepath.Join(machineConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), "root.ext4")
@@ -191,14 +190,14 @@ func run(cobraCommand *cobra.Command, _ []string) {
 				dependencyStage := scs.NamedStage(dependency)
 				if dependencyStage == nil {
 					rootLogger.Error("main build stage depends on non-existent stage", "dependency", dependency)
-					cleanup.exec() // manually - defers don't run on os.Exit
+					cleanup.CallAll() // manually - defers don't run on os.Exit
 					os.Exit(1)
 				}
 				dependencyBuilder := build.NewDefaultDependencyBuild(dependencyStage, tempDirectory, filepath.Join(tempDirectory, "sources"))
 				resolvedResources, buildError := dependencyBuilder.Build(requiredCopies)
 				if buildError != nil {
 					rootLogger.Error("failed building stage dependency", "stage", stage.Name(), "dependency", dependency, "reason", buildError)
-					cleanup.exec() // manually - defers don't run on os.Exit
+					cleanup.CallAll() // manually - defers don't run on os.Exit
 					os.Exit(1)
 				}
 				dependencyResources[dependency] = resolvedResources
@@ -206,14 +205,16 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	}
 
-	if err := copyFile(sourceRootfs, buildRootfs, rootFSCopyBufferSize); err != nil {
+	if err := utils.CopyFile(sourceRootfs, buildRootfs, rootFSCopyBufferSize); err != nil {
 		rootLogger.Error("failed copying requested rootfs to temp build location",
 			"source", sourceRootfs,
 			"target", buildRootfs,
 			"reason", err)
-		cleanup.exec() // manually - defers don't run on os.Exit
+		cleanup.CallAll() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
+
+	// -- Command specific // END
 
 	vethIfaceName := getRandomVethName()
 
@@ -225,10 +226,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		"origin-rootfs", sourceRootfs,
 		"jail", jailingFcConfig.JailerChrootDirectory())
 
-	cleanup.add(func() {
+	cleanup.Add(func() {
 		vmmLogger.Info("cleaning up jail directory")
-		status := os.RemoveAll(jailingFcConfig.JailerChrootDirectory())
-		vmmLogger.Info("jail directory removal status", "error", status)
+		if err := os.RemoveAll(jailingFcConfig.JailerChrootDirectory()); err != nil {
+			vmmLogger.Info("jail directory removal status", "error", err)
+		}
 	})
 
 	strategyConfig := &strategy.SSHKeyInjectingHandlerConfig{
@@ -248,24 +250,23 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	})
 
-	fcConfig := configs.NewFcConfigProvider(jailingFcConfig, machineConfig).
+	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
 		WithHandlersAdapter(strategy).
-		WithVethIfaceName(vethIfaceName).
 		WithRootFsHostPath(buildRootfs).
-		ToSDKConfig()
+		WithVethIfaceName(vethIfaceName)
 
 	vmmCtx, vmmCancel := context.WithCancel(context.Background())
-	cleanup.add(func() {
+	cleanup.Add(func() {
 		vmmCancel()
 	})
 
-	machine, runErr := runVMM(vmmCtx, fcConfig)
+	startedMachine, runErr := vmmProvider.Start(vmmCtx)
 	if runErr != nil {
 		vmmLogger.Error("Firecracker VMM did not start, build failed", "reason", runErr)
 		return
 	}
 
-	ifaceStaticConfig := fcConfig.NetworkInterfaces[0].StaticConfiguration
+	ifaceStaticConfig := startedMachine.NetworkInterfaces()[0].StaticConfiguration
 
 	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IPAddr.IP.String())
 
@@ -280,7 +281,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}, vmmLogger.Named("remote-client"))
 
 	if remoteErr != nil {
-		stopVMM(vmmCtx, machine, vethIfaceName, nil, vmmLogger)
+		startedMachine.Stop(vmmCtx, nil)
 		vmmLogger.Error("Failed connecting to remote", "reason", remoteErr)
 		return
 	}
@@ -291,7 +292,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		egressCtx, egressWaitCancelFunc := context.WithTimeout(vmmCtx, time.Second*time.Duration(egressTestConfig.EgressTestTimeoutSeconds))
 		defer egressWaitCancelFunc()
 		if err := remoteClient.WaitForEgress(egressCtx, egressTestConfig.EgressTestTarget); err != nil {
-			stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+			startedMachine.Stop(vmmCtx, remoteClient)
 			vmmLogger.Error("Did not get egress connectivity within a timeout", "reason", err)
 			return
 		}
@@ -315,26 +316,17 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		WithPreBuildCommands(preBuildCommands...).
 		WithDependencyResources(dependencyResources).
 		Build(remoteClient); err != nil {
-		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+		startedMachine.Stop(vmmCtx, remoteClient)
 		vmmLogger.Error("Failed boostrapping remote via SSH", "reason", buildErr)
 		return
 	}
 
-	go func() {
-		if stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger) == stoppedForcefully {
-			vmmLogger.Warn("Machine was not stopped gracefully, see previous errors. It's possible that the file system may not be complete. Retry or proceed with caution.")
-		}
-	}()
+	startedMachine.StopAndWait(vmmCtx, remoteClient)
 
-	vmmLogger.Info("Waiting for machine to stop...")
-
-	machine.Wait(context.Background())
-
-	vmmLogger.Info("Machine to stopped. Persisting the file system...")
+	vmmLogger.Info("Machine is stopped. Persisting the file system...")
 
 	ok, org, name, version := tagDecompose(commandConfig.Tag)
 	if !ok {
-		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
 		vmmLogger.Error("Tag could not be decomposed", "tag", commandConfig.Tag)
 		return
 	}
@@ -344,13 +336,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	fileSystemTarget := filepath.Join(fileSystemTargetDirectory, fsFileName)
 
 	if err := os.MkdirAll(filepath.Dir(fileSystemTarget), 0644); err != nil {
-		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
 		vmmLogger.Error("Failed creating final build target directory", "reason", err)
 		return
 	}
 
-	if copyErr := copyFile(filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root", fsFileName), fileSystemTarget, 4*1024*1024); copyErr != nil {
-		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
+	if copyErr := utils.MoveFile(filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root", fsFileName), fileSystemTarget); copyErr != nil {
 		vmmLogger.Error("Failed copying built file", "tag", commandConfig.Tag)
 		return
 	}
@@ -370,125 +360,17 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	metadataJSONBytes, jsonErr := json.MarshalIndent(&metadata, "", "  ")
 	if jsonErr != nil {
-		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
 		vmmLogger.Error("Machine metadata could not be serialized to JSON", "metadata", metadata, "reason", jsonErr)
 		return
 	}
 
 	if writeErr := ioutil.WriteFile(metadataFileName, metadataJSONBytes, 0644); writeErr != nil {
-		stopVMM(vmmCtx, machine, vethIfaceName, remoteClient, vmmLogger)
 		vmmLogger.Error("Machine metadata not written to file", "metadata", metadata, "reason", jsonErr)
 		return
 	}
 
 	vmmLogger.Info("Build completed successfully. Rootfs tagged.", "storage-path", fileSystemTarget)
 
-}
-
-func stopVMM(ctx context.Context, machine *firecracker.Machine, vethIfaceName string, remoteClient remote.ConnectedClient, logger hclog.Logger) stoppedOK {
-
-	if remoteClient != nil {
-		logger.Info("Closing remote client...")
-		status := remoteClient.Close()
-		logger.Info("Remote client closed", "error", status)
-	}
-
-	shutdownCtx, cancelFunc := context.WithTimeout(ctx, time.Second*time.Duration(commandConfig.ShutdownGracefulTimeoutSeconds))
-	defer cancelFunc()
-
-	logger.Info("Attempting VMM graceful shutdown...")
-
-	chanStopped := make(chan error, 1)
-	go func() {
-		// Ask the machine to shut down so the file system gets flushed
-		// and out changes are written to disk.
-		chanStopped <- machine.Shutdown(shutdownCtx)
-	}()
-
-	stoppedState := stoppedForcefully
-
-	select {
-	case stopErr := <-chanStopped:
-		if stopErr != nil {
-			logger.Warn("VMM stopped with error but within timeout", "reason", stopErr)
-			logger.Warn("VMM stopped forcefully", "error", machine.StopVMM())
-		} else {
-			logger.Warn("VMM stopped gracefully")
-			stoppedState = stoppedGracefully
-		}
-	case <-shutdownCtx.Done():
-		logger.Warn("VMM failed to stop gracefully: timeout reached")
-		logger.Warn("VMM stopped forcefully", "error", machine.StopVMM())
-	}
-
-	logger.Info("Cleaning up CNI network...")
-
-	cniCleanupErr := cleanupCNINetwork(cniConfig,
-		machine.Cfg.NetNS,
-		machine.Cfg.VMID,
-		machineConfig.MachineCNINetworkName,
-		vethIfaceName)
-
-	logger.Info("CNI network cleanup status", "error", cniCleanupErr)
-
-	return stoppedState
-}
-
-func runVMM(ctx context.Context, fcConfig firecracker.Config) (*firecracker.Machine, error) {
-	vmmLogger := logrus.New()
-	machineOpts := []firecracker.Opt{
-		firecracker.WithLogger(logrus.NewEntry(vmmLogger)),
-	}
-	m, err := firecracker.NewMachine(ctx, fcConfig, machineOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("Failed creating machine: %s", err)
-	}
-	if err := m.Start(ctx); err != nil {
-		return nil, fmt.Errorf("Failed to start machine: %v", err)
-	}
-	return m, nil
-}
-
-func copyFile(source, dest string, bufferSize int) error {
-	sourceFile, err := os.Open(source)
-	if err != nil {
-		return nil
-	}
-	destFile, err := os.Create(dest)
-	if err != nil {
-		return nil
-	}
-	buf := make([]byte, bufferSize)
-	for {
-		n, err := sourceFile.Read(buf)
-		if err != nil && err != io.EOF {
-			return err
-		}
-		if n == 0 {
-			break
-		}
-
-		if _, err := destFile.Write(buf[:n]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func cleanupCNINetwork(cniConfig *configs.CNIConfig, netNs, vmmID, networkName, ifname string) error {
-	cniPlugin := libcni.NewCNIConfigWithCacheDir([]string{cniConfig.BinDir}, cniConfig.CacheDir, nil)
-	networkConfig, err := libcni.LoadConfList(cniConfig.ConfDir, networkName)
-	if err != nil {
-		return err
-	}
-	if err := cniPlugin.DelNetworkList(context.Background(), networkConfig, &libcni.RuntimeConf{
-		ContainerID: vmmID, // golang firecracker SDK uses the VMID, if VMID is set
-		NetNS:       netNs,
-		IfName:      ifname,
-	}); err != nil {
-		return err
-	}
-	return nil
 }
 
 func getRandomVethName() string {
