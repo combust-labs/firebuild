@@ -8,13 +8,24 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/gofrs/uuid"
 	"github.com/spf13/pflag"
 )
 
+// DefaultVethIfaceName is the default veth interface name.
 const DefaultVethIfaceName = "veth0"
+
+// DefaultFirectackerStrategy returns an instance of the default Firecracker Jailer strategy for a given machine config.
+func DefaultFirectackerStrategy(machineConfig *MachineConfig) arbitrary.Strategy {
+	return arbitrary.NewStrategy(func() *arbitrary.HandlerWithRequirement {
+		return arbitrary.NewHandlerWithRequirement(firecracker.
+			LinkFilesHandler(filepath.Base(machineConfig.MachineVMLinux)),
+			firecracker.CreateLogFilesHandlerName)
+	})
+}
 
 // JailingFirecrackerConfig represents firecracker specific configuration options.
 type JailingFirecrackerConfig struct {
@@ -152,7 +163,7 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 			Daemonize:     false,
 			ChrootStrategy: func() firecracker.HandlersAdapter {
 				if c.fcStrategy == nil {
-					return firecracker.NewNaiveChrootStrategy(filepath.Base(c.machineConfig.MachineVMLinux))
+					return DefaultFirectackerStrategy(c.machineConfig)
 				}
 				return c.fcStrategy
 			}(),

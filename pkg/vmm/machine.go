@@ -14,9 +14,13 @@ import (
 	"github.com/pkg/errors"
 )
 
+// StartedMachine abstracts a started Firecracker VMM.
 type StartedMachine interface {
+	// NetworkInterfaces returns network interfaces of a running VMM.
 	NetworkInterfaces() firecracker.NetworkInterfaces
+	// Stop stops the VMM, remote connected client may be nil.
 	Stop(context.Context, remote.ConnectedClient) StoppedOK
+	// StopAndWait stops the VMM and waits for the VMM to stop, remote connected client may be nil.
 	StopAndWait(context.Context, remote.ConnectedClient)
 }
 

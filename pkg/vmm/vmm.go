@@ -3,7 +3,6 @@ package vmm
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
@@ -22,7 +21,9 @@ var (
 	StoppedForcefully = StoppedOK(false)
 )
 
+// Provider abstracts the configuration required to start a VMM.
 type Provider interface {
+	// Start starts the VMM.
 	Start(context.Context) (StartedMachine, error)
 
 	WithHandlersAdapter(firecracker.HandlersAdapter) Provider
@@ -42,13 +43,14 @@ type defaultProvider struct {
 	vethIfaceName   string
 }
 
+// NewDefaultProvider creates a default provider.
 func NewDefaultProvider(cniConfig *configs.CNIConfig, jailingFcConfig *configs.JailingFirecrackerConfig, machineConfig *configs.MachineConfig) Provider {
 	return &defaultProvider{
 		cniConfig:       cniConfig,
 		jailingFcConfig: jailingFcConfig,
 		machineConfig:   machineConfig,
 
-		handlersAdapter: firecracker.NewNaiveChrootStrategy(filepath.Base(machineConfig.MachineVMLinux)),
+		handlersAdapter: configs.DefaultFirectackerStrategy(machineConfig),
 		logger:          hclog.Default(),
 		rootFsHostPath:  machineConfig.MachineRootFSBase,
 		vethIfaceName:   configs.DefaultVethIfaceName,

@@ -16,6 +16,7 @@ import (
 	"github.com/combust-labs/firebuild/build/stage"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/strategy"
+	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
 	"github.com/combust-labs/firebuild/remote"
@@ -242,13 +243,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		},
 	}
 
-	strategy := strategy.NewSSHKeyInjectingStrategy(rootLogger, strategyConfig, func() strategy.HandlerWithRequirement {
-		return strategy.HandlerWithRequirement{
-			AppendAfter: firecracker.CreateLogFilesHandlerName,
-			// replicate what firecracker.NaiveChrootStrategy is doing...
-			Handler: firecracker.LinkFilesHandler(filepath.Base(machineConfig.MachineVMLinux)),
-		}
-	})
+	strategy := configs.DefaultFirectackerStrategy(machineConfig).
+		AddRequirements(func() *arbitrary.HandlerWithRequirement {
+			return arbitrary.NewHandlerWithRequirement(strategy.
+				NewSSHKeyInjectingHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
+		})
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
 		WithHandlersAdapter(strategy).

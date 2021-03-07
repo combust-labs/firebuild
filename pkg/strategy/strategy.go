@@ -171,12 +171,7 @@ func NewSSHKeyInjectingHandler(logger hclog.Logger, config *SSHKeyInjectingHandl
 	}
 }
 
-// HandlerWithRequirement provides a firecracker Handler with a name of the handler to append this handler after.
-type HandlerWithRequirement struct {
-	AppendAfter string
-	Handler     firecracker.Handler
-}
-
+/*
 // SSHKeyInjectingStrategy injects the SSH public keys into a file system
 // before Jailer takes over.
 type SSHKeyInjectingStrategy struct {
@@ -193,10 +188,6 @@ func NewSSHKeyInjectingStrategy(logger hclog.Logger, config *SSHKeyInjectingHand
 		logger:           logger,
 	}
 }
-
-// ErrRequiredHandlerMissing occurs when a required handler is not present in
-// the handler list.
-var ErrRequiredHandlerMissing = fmt.Errorf("required handler is missing from FcInit's list")
 
 // AdaptHandlers will inject the LinkFilesHandler into the handler list.
 func (s SSHKeyInjectingStrategy) AdaptHandlers(handlers *firecracker.Handlers) error {
@@ -223,3 +214,4 @@ func (s SSHKeyInjectingStrategy) AdaptHandlers(handlers *firecracker.Handlers) e
 
 	return nil
 }
+*/
