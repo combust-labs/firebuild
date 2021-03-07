@@ -3,7 +3,6 @@ package rootfs
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	"github.com/combust-labs/firebuild/build/resources"
 	"github.com/combust-labs/firebuild/build/stage"
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/strategy"
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
@@ -150,8 +150,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	structuredBase := buildContext.From().ToStructuredFrom()
 
 	// TODO: check that it exists and is regular file
-	sourceRootfs := filepath.Join(machineConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), "root.ext4")
-	buildRootfs := filepath.Join(tempDirectory, "rootfs")
+	sourceRootfs := filepath.Join(machineConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), build.RootfsFileName)
+	buildRootfs := filepath.Join(tempDirectory, build.RootfsFileName)
 
 	// which resources from dependencies do we need:
 	requiredCopies := []commands.Copy{}
@@ -200,7 +200,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	// -- Command specific // END
 
-	vethIfaceName := getRandomVethName()
+	vethIfaceName := naming.GetRandomVethName()
 
 	vmmLogger := rootLogger.With("vmm-id", jailingFcConfig.VMMID(), "veth-name", vethIfaceName)
 
@@ -353,8 +353,4 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmLogger.Info("Build completed successfully. Rootfs tagged.", "storage-path", fileSystemTarget)
 
-}
-
-func getRandomVethName() string {
-	return fmt.Sprintf("veth%s", utils.RandStringBytes(11))
 }

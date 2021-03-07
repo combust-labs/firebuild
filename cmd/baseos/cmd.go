@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/combust-labs/firebuild/build"
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/reader"
 	"github.com/combust-labs/firebuild/build/stage"
@@ -17,11 +18,6 @@ import (
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/spf13/cobra"
 )
-
-/*
-	sudo /usr/local/go/bin/go run ./main.go baseos --dockerfile $(pwd)/baseos/_/alpine/3.13/Dockerfile
-	the authorized keys file must be 0400
-*/
 
 // Command is the build command declaration.
 var Command = &cobra.Command{
@@ -199,7 +195,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	rootLogger.Info("EXT4 file unmounted from mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
 
 	structuredBase := fromToBuild.ToStructuredFrom()
-	rootFsTargetFile := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), "root.ext4")
+	rootFsTargetFile := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), build.RootfsFileName)
 
 	if err := utils.MoveFile(rootFSFile, rootFsTargetFile); err != nil {
 		rootLogger.Error("failed moving produced file system", "reason", err)
