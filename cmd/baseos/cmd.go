@@ -31,22 +31,13 @@ var Command = &cobra.Command{
 	Long:  ``,
 }
 
-type buildConfig struct {
-	Dockerfile        string
-	FSSizeMBs         int
-	MachineRootFSBase string
-}
-
 var (
-	commandConfig = new(buildConfig)
+	commandConfig = configs.NewBaseOSCommandConfig()
 	logConfig     = configs.NewLogginConfig()
 )
 
 func initFlags() {
-	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Full path to the base OS Dockerfile")
-	Command.Flags().IntVar(&commandConfig.FSSizeMBs, "filesystem-size-mbs", 500, "File system size in megabytes")
-	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside, required, can't be /")
-
+	Command.Flags().AddFlagSet(commandConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 }
 

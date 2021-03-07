@@ -33,42 +33,25 @@ var Command = &cobra.Command{
 	Long:  ``,
 }
 
-type buildConfig struct {
-	BuildArgs            map[string]string
-	Dockerfile           string
-	PostBuildCommands    []string
-	PreBuildCommands     []string
-	ServiceFileInstaller string
-	Tag                  string
-}
-
 var (
 	cniConfig        = configs.NewCNIConfig()
+	commandConfig    = configs.NewRootfsCommandConfig()
 	egressTestConfig = configs.NewEgressTestConfig()
 	jailingFcConfig  = configs.NewJailingFirecrackerConfig()
 	logConfig        = configs.NewLogginConfig()
 	machineConfig    = configs.NewMachineConfig()
 
-	commandConfig        = new(buildConfig)
 	rootFSCopyBufferSize = 4 * 1024 * 1024
 	rsaKeySize           = 4096
 )
 
 func initFlags() {
-
 	Command.Flags().AddFlagSet(cniConfig.FlagSet())
+	Command.Flags().AddFlagSet(commandConfig.FlagSet())
 	Command.Flags().AddFlagSet(egressTestConfig.FlagSet())
 	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
-
-	// Bootstrap settings:
-	Command.Flags().StringToStringVar(&commandConfig.BuildArgs, "build-arg", map[string]string{}, "Build arguments, Multiple OK")
-	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
-	Command.Flags().StringArrayVar(&commandConfig.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
-	Command.Flags().StringArrayVar(&commandConfig.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
-	Command.Flags().StringVar(&commandConfig.ServiceFileInstaller, "service-file-installer", "", "Local path to the program to upload to the VMM and install the service file")
-	Command.Flags().StringVar(&commandConfig.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
 }
 
 func init() {

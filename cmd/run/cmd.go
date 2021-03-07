@@ -17,6 +17,7 @@ var Command = &cobra.Command{
 
 var (
 	cniConfig        = configs.NewCNIConfig()
+	commandConfig    = configs.NewRunCommandConfig()
 	egressTestConfig = configs.NewEgressTestConfig()
 	jailingFcConfig  = configs.NewJailingFirecrackerConfig()
 	logConfig        = configs.NewLogginConfig()
@@ -25,6 +26,7 @@ var (
 
 func initFlags() {
 	Command.Flags().AddFlagSet(cniConfig.FlagSet())
+	Command.Flags().AddFlagSet(commandConfig.FlagSet())
 	Command.Flags().AddFlagSet(egressTestConfig.FlagSet())
 	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
