@@ -4,47 +4,49 @@ import (
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 )
 
-// HandlerWithRequirement provides a firecracker Handler with a name of the handler to append this handler after.
-type HandlerWithRequirement struct {
+// HandlerPlacement provides a firecracker handler placement instruction.
+// The handler will be placed after the requirement.
+type HandlerPlacement struct {
 	AppendAfter string
 	Handler     firecracker.Handler
 }
 
-func NewHandlerWithRequirement(handler firecracker.Handler, requirement string) *HandlerWithRequirement {
-	return &HandlerWithRequirement{
+// NewHandlerPlacement creates a new handler placement.
+func NewHandlerPlacement(handler firecracker.Handler, requirement string) *HandlerPlacement {
+	return &HandlerPlacement{
 		AppendAfter: requirement,
 		Handler:     handler,
 	}
 }
 
-// Strategy inserts the handlers at the arbitrary required position.
-type Strategy struct {
-	handlerProviders []func() *HandlerWithRequirement
+// PlacingStrategy inserts the handlers at the arbitrary required position.
+type PlacingStrategy struct {
+	handlerPlacements []func() *HandlerPlacement
 }
 
-// NewStrategy returns a new ArbitraryStraetgy.
-func NewStrategy(handlerProvider ...func() *HandlerWithRequirement) Strategy {
-	return Strategy{
-		handlerProviders: handlerProvider,
+// NewStrategy returns a new PlacingStrategy.
+func NewStrategy(handlerPlacement ...func() *HandlerPlacement) PlacingStrategy {
+	return PlacingStrategy{
+		handlerPlacements: handlerPlacement,
 	}
 }
 
 // AddRequirements adds more arbitrary handlers with requirements.
-func (s Strategy) AddRequirements(handlerProvider ...func() *HandlerWithRequirement) Strategy {
-	s.handlerProviders = append(s.handlerProviders, handlerProvider...)
+func (s PlacingStrategy) AddRequirements(handlerPlacement ...func() *HandlerPlacement) PlacingStrategy {
+	s.handlerPlacements = append(s.handlerPlacements, handlerPlacement...)
 	return s
 }
 
 // AdaptHandlers will inject the LinkFilesHandler into the handler list.
-func (s Strategy) AdaptHandlers(handlers *firecracker.Handlers) error {
-	for _, handlerProvider := range s.handlerProviders {
-		requirement := handlerProvider()
-		if !handlers.FcInit.Has(requirement.AppendAfter) {
+func (s PlacingStrategy) AdaptHandlers(handlers *firecracker.Handlers) error {
+	for _, placementDef := range s.handlerPlacements {
+		placement := placementDef()
+		if !handlers.FcInit.Has(placement.AppendAfter) {
 			return firecracker.ErrRequiredHandlerMissing
 		}
 		handlers.FcInit = handlers.FcInit.AppendAfter(
-			requirement.AppendAfter,
-			requirement.Handler,
+			placement.AppendAfter,
+			placement.Handler,
 		)
 	}
 	return nil

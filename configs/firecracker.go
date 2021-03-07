@@ -19,9 +19,9 @@ import (
 const DefaultVethIfaceName = "veth0"
 
 // DefaultFirectackerStrategy returns an instance of the default Firecracker Jailer strategy for a given machine config.
-func DefaultFirectackerStrategy(machineConfig *MachineConfig) arbitrary.Strategy {
-	return arbitrary.NewStrategy(func() *arbitrary.HandlerWithRequirement {
-		return arbitrary.NewHandlerWithRequirement(firecracker.
+func DefaultFirectackerStrategy(machineConfig *MachineConfig) arbitrary.PlacingStrategy {
+	return arbitrary.NewStrategy(func() *arbitrary.HandlerPlacement {
+		return arbitrary.NewHandlerPlacement(firecracker.
 			LinkFilesHandler(filepath.Base(machineConfig.MachineVMLinux)),
 			firecracker.CreateLogFilesHandlerName)
 	})

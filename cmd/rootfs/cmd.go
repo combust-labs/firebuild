@@ -244,8 +244,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	strategy := configs.DefaultFirectackerStrategy(machineConfig).
-		AddRequirements(func() *arbitrary.HandlerWithRequirement {
-			return arbitrary.NewHandlerWithRequirement(strategy.
+		AddRequirements(func() *arbitrary.HandlerPlacement {
+			return arbitrary.NewHandlerPlacement(strategy.
 				NewSSHKeyInjectingHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
 		})
 
