@@ -4,7 +4,6 @@
 
 cat << 'EOF' > /etc/local.d/DockerEntrypoint.start
 mkdir -p /var/log
-. /etc/firebuild/cmd.env
 SNAME=DockerEntrypoint
 nohup /bin/sh -c ". /etc/firebuild/cmd.env && cd ${SERVICE_WORKDIR} && ${SERVICE_ENTRYPOINT} ${SERVICE_CMDS} > /var/log/${SNAME}.log 2>&1" &>/var/log/${SNAME}-nohup.log
 EOF

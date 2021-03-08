@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
@@ -132,7 +133,7 @@ func (handler *pseudoCloudInitHandlerImplementation) injectEnvironment() error {
 	if len(handler.config.Environment) == 0 {
 		return nil // nothing to do
 	}
-	envFile := filepath.Join(handler.mountedFsRoot, "/etc/profile.d/bootstrap-env.sh")
+	envFile := filepath.Join(handler.mountedFsRoot, naming.RunEnvVarsFile)
 	// make sure a parent directory exists:
 	dirExists, err := utils.PathExists(filepath.Dir(envFile))
 	if err != nil {

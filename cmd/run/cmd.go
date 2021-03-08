@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/combust-labs/firebuild/build"
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/naming"
@@ -103,7 +102,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	structuredFrom := from.ToStructuredFrom()
 
 	fileSystemSource := filepath.Join(machineConfig.MachineRootFSBase, "_builds",
-		structuredFrom.Org(), structuredFrom.OS(), structuredFrom.Version(), build.RootfsFileName)
+		structuredFrom.Org(), structuredFrom.OS(), structuredFrom.Version(), naming.RootfsFileName)
 
 	vethIfaceName := naming.GetRandomVethName()
 

@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/combust-labs/firebuild/build"
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/reader"
 	"github.com/combust-labs/firebuild/build/stage"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/containers"
+	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/spf13/cobra"
 )
@@ -195,7 +195,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	rootLogger.Info("EXT4 file unmounted from mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
 
 	structuredBase := fromToBuild.ToStructuredFrom()
-	rootFsTargetFile := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), build.RootfsFileName)
+	rootFsTargetFile := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), naming.RootfsFileName)
 
 	if err := utils.MoveFile(rootFSFile, rootFsTargetFile); err != nil {
 		rootLogger.Error("failed moving produced file system", "reason", err)

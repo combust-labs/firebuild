@@ -5,8 +5,6 @@
 cat << 'EOF' > /etc/init.d/DockerEntrypoint.sh
 #!/bin/sh
 
-# source the environment file:
-. /etc/firebuild/cmd.env
 # make sure /dev/fd points to the right place:
 [ ! -d /dev/fd ] && ln -s /proc/self/fd /dev/fd
 

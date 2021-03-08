@@ -13,15 +13,11 @@ import (
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/env"
 	"github.com/combust-labs/firebuild/build/resources"
-	"github.com/combust-labs/firebuild/remote"
+	"github.com/combust-labs/firebuild/pkg/naming"
+	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"
 )
-
-const etcDirectory = "/etc/firebuild"
-
-// RootfsFileName is the base name of the root file system, as stored on disk.
-const RootfsFileName = "rootfs"
 
 // Build represents the build operation.
 type Build interface {
@@ -199,11 +195,11 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 
 	// always create the service env file:
 	serviceEnv := []string{
-		fmt.Sprintf("SERVICE_WORKDIR=\"%s\"", b.currentEntrypoint.Workdir.Value),
-		fmt.Sprintf("SERVICE_SHELL=\"%s\"", strings.Join(mapShellString(b.currentEntrypoint.Shell.Commands), " ")),
-		fmt.Sprintf("SERVICE_ENTRYPOINT=\"%s\"", strings.Join(mapShellString(b.currentEntrypoint.Values), " ")),
-		fmt.Sprintf("SERVICE_CMDS=\"%s\"", strings.Join(mapShellString(b.currentCmd.Values), " ")),
-		fmt.Sprintf("SERVICE_USER=\"%s\"", b.currentEntrypoint.User.Value),
+		fmt.Sprintf("export SERVICE_WORKDIR=\"%s\"", b.currentEntrypoint.Workdir.Value),
+		fmt.Sprintf("export SERVICE_SHELL=\"%s\"", strings.Join(mapShellString(b.currentEntrypoint.Shell.Commands), " ")),
+		fmt.Sprintf("export SERVICE_ENTRYPOINT=\"%s\"", strings.Join(mapShellString(b.currentEntrypoint.Values), " ")),
+		fmt.Sprintf("export SERVICE_CMDS=\"%s\"", strings.Join(mapShellString(b.currentCmd.Values), " ")),
+		fmt.Sprintf("export SERVICE_USER=\"%s\"", b.currentEntrypoint.User.Value),
 	}
 
 	// put gathered environment in the env file:
@@ -211,11 +207,11 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 		serviceEnv = append(serviceEnv, fmt.Sprintf("export %s=\"%s\"", k, v))
 	}
 
-	b.logger.Info("Creating bootstrap data location", "location", etcDirectory)
+	b.logger.Info("Creating bootstrap data location", "location", naming.RootfsEnvVarsFile)
 
-	if err := remoteClient.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s'", etcDirectory))); err != nil {
-		b.logger.Error("BOOTSTRAP INCOMPLETE: Failed creating firebuild bootstrap data directory",
-			"directory", etcDirectory,
+	if err := remoteClient.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s'", filepath.Dir(naming.RootfsEnvVarsFile)))); err != nil {
+		b.logger.Error("BOOTSTRAP INCOMPLETE: Failed creating bootstrap environment directory",
+			"directory", filepath.Dir(naming.RootfsEnvVarsFile),
 			"reason", err,
 			"service-env", serviceEnv)
 		return err
@@ -231,7 +227,7 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 		NewResolvedFileResource(serviceEnvReader,
 			fs.FileMode(0644),
 			"",
-			filepath.Join(etcDirectory, "cmd.env"),
+			naming.RootfsEnvVarsFile,
 			commands.DefaultWorkdir(),
 			commands.DefaultUser())); err != nil {
 		b.logger.Error("BOOTSTRAP INCOMPLETE: Failed uploading the service environment file",
@@ -272,13 +268,19 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 			return io.NopCloser(bytes.NewReader([]byte(installerBytes))), nil
 		}
 
+		if err := remoteClient.RunCommand(commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s'", filepath.Dir(naming.ServiceInstallerFile)))); err != nil {
+			b.logger.Error("BOOTSTRAP INCOMPLETE: Failed creating service installer directory",
+				"directory", filepath.Dir(naming.ServiceInstallerFile),
+				"reason", err)
+			return err
+		}
+
 		// upload the installer:
-		installerPath := filepath.Join(etcDirectory, "installer.sh")
 		if err := remoteClient.PutResource(resources.
 			NewResolvedFileResource(serviceInstallerReader,
 				fs.FileMode(0754),
 				"",
-				installerPath,
+				naming.ServiceInstallerFile,
 				commands.DefaultWorkdir(),
 				commands.DefaultUser())); err != nil {
 			b.logger.Error("Failed uploading the service environment file",
@@ -290,9 +292,9 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 		b.logger.Info("Executing service installer file")
 
 		// execute the installer, we leave it there...:
-		if err := remoteClient.RunCommand(commands.RunWithDefaults(installerPath)); err != nil {
+		if err := remoteClient.RunCommand(commands.RunWithDefaults(naming.ServiceInstallerFile)); err != nil {
 			b.logger.Error("BOOTSTRAP INCOMPLETE: Failed executing the local service installer",
-				"installer-path", installerPath,
+				"installer-path", naming.ServiceInstallerFile,
 				"reason", err,
 				"service-env", serviceEnv)
 			return err

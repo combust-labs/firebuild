@@ -15,11 +15,11 @@ import (
 	"github.com/combust-labs/firebuild/build/stage"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/naming"
+	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/combust-labs/firebuild/pkg/strategy"
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
-	"github.com/combust-labs/firebuild/remote"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -150,8 +150,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	structuredBase := buildContext.From().ToStructuredFrom()
 
 	// TODO: check that it exists and is regular file
-	sourceRootfs := filepath.Join(machineConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), build.RootfsFileName)
-	buildRootfs := filepath.Join(tempDirectory, build.RootfsFileName)
+	sourceRootfs := filepath.Join(machineConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), naming.RootfsFileName)
+	buildRootfs := filepath.Join(tempDirectory, naming.RootfsFileName)
 
 	// which resources from dependencies do we need:
 	requiredCopies := []commands.Copy{}

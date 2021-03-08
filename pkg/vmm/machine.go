@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/combust-labs/firebuild/configs"
-	"github.com/combust-labs/firebuild/remote"
+	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/containernetworking/cni/libcni"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
