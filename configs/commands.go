@@ -1,6 +1,13 @@
 package configs
 
-import "github.com/spf13/pflag"
+import (
+	"os"
+
+	"github.com/combust-labs/firebuild/pkg/utils"
+	"github.com/pkg/errors"
+	"github.com/spf13/pflag"
+	"github.com/subosito/gotenv"
+)
 
 // BaseOSCommandConfig is the baseos command configuration.
 type BaseOSCommandConfig struct {
@@ -59,6 +66,7 @@ func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 // RunCommandConfig is the run command configuration.
 type RunCommandConfig struct {
 	flagBase
+	ValidatingConfig
 
 	EnvFiles     []string
 	EnvVars      map[string]string
@@ -82,4 +90,41 @@ func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.Hostname, "hostname", "vmm", "Hostname to apply to the VMM during bootstrap")
 	}
 	return c.flagSet
+}
+
+// MergedEnvironment returns merged envirionment declared by the configuration.
+// The order of merging:
+//  - parse each env file in order provided
+//  - apply all individual --env values
+// Duplicated values are always overriden.
+func (c *RunCommandConfig) MergedEnvironment() (map[string]string, error) {
+	env := map[string]string{}
+	for _, envFile := range c.EnvFiles {
+		f, openErr := os.Open(envFile)
+		if openErr != nil {
+			return env, errors.Wrapf(openErr, "failed opening environment file '%s' for reading", envFile)
+		}
+		defer f.Close()
+		partialEnv, parseErr := gotenv.StrictParse(f)
+		if parseErr != nil {
+			return env, errors.Wrapf(parseErr, "failed parsing environment file '%s'", envFile)
+		}
+		for k, v := range partialEnv {
+			env[k] = v
+		}
+	}
+	for k, v := range c.EnvVars {
+		env[k] = v
+	}
+	return env, nil
+}
+
+// Validate validates the correctness of the configuration.
+func (c *RunCommandConfig) Validate() error {
+	for _, envFile := range c.EnvFiles {
+		if _, statErr := utils.CheckIfExistsAndIsRegular(envFile); statErr != nil {
+			return errors.Wrapf(statErr, "environment file '%s' stat error", envFile)
+		}
+	}
+	return nil
 }

@@ -31,6 +31,10 @@ import (
 		--machine-rootfs-base=/firecracker/rootfs \
 		--machine-ssh-user=debian \
 		--machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
+		--hostname=run-command-test \
+		--env='VAR1=value1' \
+		--env='VAR2=value2' \
+		--env='VAR3=value3' \
 		--log-as-json
 */
 
@@ -77,6 +81,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	validatingConfigs := []configs.ValidatingConfig{
+		commandConfig,
 		jailingFcConfig,
 		machineConfig,
 	}
@@ -86,6 +91,12 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			rootLogger.Error("configuration is invalid", "reason", err)
 			os.Exit(1)
 		}
+	}
+
+	vmmEnvironment, envErr := commandConfig.MergedEnvironment()
+	if envErr != nil {
+		rootLogger.Error("failed merging environment", "reason", envErr)
+		os.Exit(1)
 	}
 
 	from := commands.From{BaseImage: commandConfig.From}
@@ -126,8 +137,9 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		SSHUser:        machineConfig.MachineSSHUser,
 
 		// VMM settings:
-		Hostname:   commandConfig.Hostname, // TODO: validate that the hostname is a valid hostname string
-		PublicKeys: strategyPublicKeys,
+		Environment: vmmEnvironment,
+		Hostname:    commandConfig.Hostname, // TODO: validate that the hostname is a valid hostname string
+		PublicKeys:  strategyPublicKeys,
 	}
 
 	strategy := configs.DefaultFirectackerStrategy(machineConfig).

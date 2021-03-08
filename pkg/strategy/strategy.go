@@ -3,9 +3,9 @@ package strategy
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
@@ -36,8 +36,9 @@ type PseudoCloudInitHandlerConfig struct {
 	RootfsFileName     string
 	SSHUser            string
 
-	Hostname   string
-	PublicKeys []ssh.PublicKey
+	Environment map[string]string
+	Hostname    string
+	PublicKeys  []ssh.PublicKey
 }
 
 // NewPseudoCloudInitHandler returns a firecracker handler which can be used to inject state into
@@ -56,7 +57,7 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 
 			jailedRootfsFile := filepath.Join(config.Chroot, "root", config.RootfsFileName)
 
-			if _, statErr := checkIfExistsAndIsRegular(jailedRootfsFile); statErr != nil {
+			if _, statErr := utils.CheckIfExistsAndIsRegular(jailedRootfsFile); statErr != nil {
 				logger.Error("jailed rootfs file requirements failed", "on-disk-path", config.RootfsFileName, "reason", statErr)
 				return statErr
 			}
@@ -99,7 +100,13 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 				logger:        logger,
 			}
 
+			if err := impl.injectEnvironment(); err != nil {
+				return err
+			}
 			if err := impl.injectHostname(); err != nil {
+				return err
+			}
+			if err := impl.injectHosts(); err != nil {
 				return err
 			}
 			if err := impl.injectSSHKeys(); err != nil {
@@ -118,6 +125,51 @@ type pseudoCloudInitHandlerImplementation struct {
 	logger        hclog.Logger
 }
 
+func (handler *pseudoCloudInitHandlerImplementation) injectEnvironment() error {
+	if handler.config.Environment == nil {
+		return nil // nothing to do
+	}
+	if len(handler.config.Environment) == 0 {
+		return nil // nothing to do
+	}
+	envFile := filepath.Join(handler.mountedFsRoot, "/etc/profile.d/bootstrap-env.sh")
+	// make sure a parent directory exists:
+	dirExists, err := utils.PathExists(filepath.Dir(envFile))
+	if err != nil {
+		handler.logger.Error("failed checking if env file parent directory exists", "reason", err)
+		return err
+	}
+	if !dirExists {
+		handler.logger.Debug("creating env file parent directory", "env-file", envFile)
+		if err := os.Mkdir(filepath.Dir(envFile), 0755); err != nil { // the default permission for this directory
+			return errors.Wrap(err, "failed creating parent env directory")
+		}
+	}
+
+	handler.logger.Debug("writing env file", "parent-existed", dirExists)
+
+	writableFile, openErr := os.OpenFile(envFile, os.O_CREATE|os.O_RDWR, 0755)
+	if openErr != nil {
+		handler.logger.Error("failed opening env file for writing", "reason", openErr)
+		return errors.Wrap(openErr, "failed opening env file for writing")
+	}
+	defer writableFile.Close()
+
+	for k, v := range handler.config.Environment {
+		line := fmt.Sprintf("export %s=\"%s\"\n", k, strings.ReplaceAll(v, "\"", "\\\""))
+		written, writeErr := writableFile.WriteString(line)
+		if err != nil {
+			return errors.Wrap(writeErr, "env file write failed: see error")
+		}
+		if written != len(line) {
+			handler.logger.Error("env file bytes written != line length", "kv", k+"::"+v, "written", written, "required", len(line))
+			return errors.New("env file write failed: written != length")
+		}
+	}
+
+	return nil
+}
+
 func (handler *pseudoCloudInitHandlerImplementation) injectHostname() error {
 
 	if len(handler.config.Hostname) == 0 {
@@ -126,7 +178,7 @@ func (handler *pseudoCloudInitHandlerImplementation) injectHostname() error {
 
 	etcHostnameFile := filepath.Join(handler.mountedFsRoot, "/etc/hostname")
 
-	sourceStat, err := checkIfExistsAndIsRegular(etcHostnameFile)
+	sourceStat, err := utils.CheckIfExistsAndIsRegular(etcHostnameFile)
 	if err != nil {
 		handler.logger.Error("hostname file requirements failed", "on-disk-path", etcHostnameFile, "reason", err)
 		return err
@@ -164,9 +216,11 @@ func (handler *pseudoCloudInitHandlerImplementation) injectHostname() error {
 	written, writeErr := writableFile.WriteString(handler.config.Hostname)
 	if writeErr != nil {
 		handler.logger.Error("failed writing hostname to file", "reason", writeErr)
+		return errors.Wrap(writeErr, "hostname file write failed: see error")
 	}
 	if written != len(handler.config.Hostname) {
 		handler.logger.Error("hostname file bytes written != hostname length", "written", written, "required", len(handler.config.Hostname))
+		return errors.New("hostname file write failed: written != length")
 	}
 
 	return nil
@@ -176,7 +230,7 @@ func (handler *pseudoCloudInitHandlerImplementation) injectHosts() error {
 
 	etcHostsFile := filepath.Join(handler.mountedFsRoot, "/etc/hosts")
 
-	sourceStat, err := checkIfExistsAndIsRegular(etcHostsFile)
+	sourceStat, err := utils.CheckIfExistsAndIsRegular(etcHostsFile)
 	if err != nil {
 		handler.logger.Error("hosts file requirements failed", "on-disk-path", etcHostsFile, "reason", err)
 		return err
@@ -216,13 +270,21 @@ func (handler *pseudoCloudInitHandlerImplementation) injectHosts() error {
 	}
 
 	for k, v := range defaultHosts {
-		hostsString := k + "\t" + v + "\n"
-		written, writeErr := writableFile.WriteString(hostsString)
+		hostsLine := k + "\t" + v
+		if k == "127.0.0.1" || k == "::1" {
+			if handler.config.Hostname != "" {
+				hostsLine = hostsLine + " " + handler.config.Hostname // TODO: change this in the future when it's possible to inject VMM IP
+			}
+		}
+		hostsLine = hostsLine + "\n"
+		written, writeErr := writableFile.WriteString(hostsLine)
 		if writeErr != nil {
 			handler.logger.Error("failed writing hosts to file", "reason", writeErr)
+			return errors.Wrap(writeErr, "hosts file write failed: see error")
 		}
-		if written != len(hostsString) {
-			handler.logger.Error("hosts file bytes written != hosts length", "kv", k+"::"+v, "written", written, "required", len(hostsString))
+		if written != len(hostsLine) {
+			handler.logger.Error("hosts file bytes written != hosts length", "kv", k+"::"+v, "written", written, "required", len(hostsLine))
+			return errors.New("hosts file write failed: written != length")
 		}
 	}
 
@@ -248,7 +310,7 @@ func (handler *pseudoCloudInitHandlerImplementation) injectSSHKeys() error {
 	handler.logger.Debug("authorized_keys file to use", "path", authorizedKeysFile, "on-disk-path", authKeysFullPath)
 	handler.logger.Debug("checking the authorized_keys file")
 
-	sourceStat, err := checkIfExistsAndIsRegular(authKeysFullPath)
+	sourceStat, err := utils.CheckIfExistsAndIsRegular(authKeysFullPath)
 	if err != nil {
 		handler.logger.Error("authorized_keys file requirements failed", "on-disk-path", authKeysFullPath, "reason", err)
 		return err
@@ -306,16 +368,4 @@ func (handler *pseudoCloudInitHandlerImplementation) injectSSHKeys() error {
 		}
 	}
 	return nil
-}
-
-func checkIfExistsAndIsRegular(path string) (fs.FileInfo, error) {
-	stat, statErr := os.Stat(path)
-	if statErr != nil {
-		return nil, errors.Wrap(statErr, "stat failed")
-	}
-
-	if !stat.Mode().IsRegular() {
-		return nil, fmt.Errorf("not a regular file", path)
-	}
-	return stat, nil
 }

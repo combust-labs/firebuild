@@ -3,11 +3,38 @@ package utils
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/pkg/errors"
 )
+
+// CheckIfExistsAndIsDirectory checks is a path points at a directory.
+func CheckIfExistsAndIsDirectory(path string) (fs.FileInfo, error) {
+	stat, statErr := os.Stat(path)
+	if statErr != nil {
+		return nil, errors.Wrap(statErr, "stat failed")
+	}
+	if !stat.Mode().IsDir() {
+		return nil, fmt.Errorf("not a directory: '%s'", path)
+	}
+	return stat, nil
+}
+
+// CheckIfExistsAndIsRegular checks is a path points at a regular file.
+func CheckIfExistsAndIsRegular(path string) (fs.FileInfo, error) {
+	stat, statErr := os.Stat(path)
+	if statErr != nil {
+		return nil, errors.Wrap(statErr, "stat failed")
+	}
+	if !stat.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file: '%s'", path)
+	}
+	return stat, nil
+}
 
 // CopyFile copies a file at the source path to the dest path.
 func CopyFile(source, dest string, bufferSize int) error {
@@ -93,6 +120,19 @@ func MoveFile(source, target string) error {
 	}
 
 	return nil
+}
+
+// PathExists returns true if path exists.
+func PathExists(path string) (bool, error) {
+	_, statErr := os.Stat(path)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return false, nil
+		}
+		return false, statErr
+	}
+	// something exists:
+	return true, nil
 }
 
 // RunShellCommandNoSudo runs a shell command without sudo.
