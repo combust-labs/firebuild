@@ -156,10 +156,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	structuredFrom := buildContext.From().ToStructuredFrom()
 
-	// TODO: check that it exists and is regular file
-	//sourceRootfs := filepath.Join(machineConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), naming.RootfsFileName)
-	//buildRootfs := filepath.Join(tempDirectory, naming.RootfsFileName)
-
 	// which resources from dependencies do we need:
 	requiredCopies := []commands.Copy{}
 	for _, stage := range scs.All() {
