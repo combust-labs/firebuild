@@ -217,7 +217,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	})
 
-	strategyConfig := &strategy.SSHKeyInjectingHandlerConfig{
+	strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
 		Chroot:         jailingFcConfig.JailerChrootDirectory(),
 		RootfsFileName: filepath.Base(buildRootfs),
 		SSHUser:        machineConfig.MachineSSHUser,
@@ -229,7 +229,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	strategy := configs.DefaultFirectackerStrategy(machineConfig).
 		AddRequirements(func() *arbitrary.HandlerPlacement {
 			return arbitrary.NewHandlerPlacement(strategy.
-				NewSSHKeyInjectingHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
+				NewPseudoCloudInitHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
 		})
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).

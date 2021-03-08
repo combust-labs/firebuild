@@ -93,6 +93,7 @@ func (c *JailingFirecrackerConfig) ensure() *JailingFirecrackerConfig {
 	return c
 }
 
+// FcConfigProvider is a Firecracker SDK configuration builder provider.
 type FcConfigProvider interface {
 	ToSDKConfig() firecracker.Config
 	WithHandlersAdapter(firecracker.HandlersAdapter) FcConfigProvider
@@ -109,6 +110,7 @@ type defaultFcConfigProvider struct {
 	vethIfaceName  string
 }
 
+// NewFcConfigProvider creates a new builder provider.
 func NewFcConfigProvider(jailingFcConfig *JailingFirecrackerConfig, machineConfig *MachineConfig) FcConfigProvider {
 	return &defaultFcConfigProvider{
 		jailingFcConfig: jailingFcConfig,

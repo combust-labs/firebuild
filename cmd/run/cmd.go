@@ -120,17 +120,20 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		strategyPublicKeys = append(strategyPublicKeys, sshPublicKey)
 	}
 
-	strategyConfig := &strategy.SSHKeyInjectingHandlerConfig{
+	strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
 		Chroot:         jailingFcConfig.JailerChrootDirectory(),
 		RootfsFileName: filepath.Base(fileSystemSource),
 		SSHUser:        machineConfig.MachineSSHUser,
-		PublicKeys:     strategyPublicKeys,
+
+		// VMM settings:
+		Hostname:   commandConfig.Hostname, // TODO: validate that the hostname is a valid hostname string
+		PublicKeys: strategyPublicKeys,
 	}
 
 	strategy := configs.DefaultFirectackerStrategy(machineConfig).
 		AddRequirements(func() *arbitrary.HandlerPlacement {
 			return arbitrary.NewHandlerPlacement(strategy.
-				NewSSHKeyInjectingHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
+				NewPseudoCloudInitHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
 		})
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
