@@ -111,7 +111,7 @@ func MoveFile(source, target string) error {
 	if !sourceStat.Mode().IsRegular() {
 		return fmt.Errorf("source is not regular file")
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0664); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
 

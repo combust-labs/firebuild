@@ -22,7 +22,7 @@ const DefaultVethIfaceName = "veth0"
 func DefaultFirectackerStrategy(machineConfig *MachineConfig) arbitrary.PlacingStrategy {
 	return arbitrary.NewStrategy(func() *arbitrary.HandlerPlacement {
 		return arbitrary.NewHandlerPlacement(firecracker.
-			LinkFilesHandler(filepath.Base(machineConfig.MachineVMLinux)),
+			LinkFilesHandler(filepath.Base(machineConfig.KernelOverride())),
 			firecracker.CreateLogFilesHandlerName)
 	})
 }
@@ -97,7 +97,6 @@ func (c *JailingFirecrackerConfig) ensure() *JailingFirecrackerConfig {
 type FcConfigProvider interface {
 	ToSDKConfig() firecracker.Config
 	WithHandlersAdapter(firecracker.HandlersAdapter) FcConfigProvider
-	WithRootFsHostPath(string) FcConfigProvider
 	WithVethIfaceName(string) FcConfigProvider
 }
 
@@ -105,9 +104,8 @@ type defaultFcConfigProvider struct {
 	jailingFcConfig *JailingFirecrackerConfig
 	machineConfig   *MachineConfig
 
-	fcStrategy     firecracker.HandlersAdapter
-	rootFsHostPath string
-	vethIfaceName  string
+	fcStrategy    firecracker.HandlersAdapter
+	vethIfaceName string
 }
 
 // NewFcConfigProvider creates a new builder provider.
@@ -129,13 +127,13 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 		LogLevel:        "debug", // CONSIDER: make this configurable
 		MetricsFifo:     "",      // not configurable for the build machines
 		FifoLogWriter:   fifo,
-		KernelImagePath: c.machineConfig.MachineVMLinux,
+		KernelImagePath: c.machineConfig.KernelOverride(),
 		KernelArgs:      c.machineConfig.MachineKernelArgs,
 		NetNS:           c.jailingFcConfig.NetNS,
 		Drives: []models.Drive{
 			{
 				DriveID:      firecracker.String("1"),
-				PathOnHost:   firecracker.String(c.rootFsHostPath),
+				PathOnHost:   firecracker.String(c.machineConfig.RootfsOverride()),
 				IsRootDevice: firecracker.Bool(true),
 				IsReadOnly:   firecracker.Bool(false),
 				Partuuid:     c.machineConfig.MachineRootDrivePartUUID,
@@ -181,11 +179,6 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 
 func (c *defaultFcConfigProvider) WithHandlersAdapter(input firecracker.HandlersAdapter) FcConfigProvider {
 	c.fcStrategy = input
-	return c
-}
-
-func (c *defaultFcConfigProvider) WithRootFsHostPath(input string) FcConfigProvider {
-	c.rootFsHostPath = input
 	return c
 }
 

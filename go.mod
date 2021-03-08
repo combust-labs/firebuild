@@ -9,6 +9,7 @@ require (
 	github.com/go-git/go-git/v5 v5.2.0
 	github.com/gofrs/uuid v4.0.0+incompatible
 	github.com/hashicorp/go-hclog v0.15.0
+	github.com/mitchellh/mapstructure v1.3.2
 	github.com/moby/buildkit v0.8.1
 	github.com/pkg/errors v0.9.1
 	github.com/pkg/sftp v1.12.0
