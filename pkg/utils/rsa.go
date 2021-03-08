@@ -5,7 +5,11 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
+	"io/ioutil"
+	"os"
 
+	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -54,4 +58,27 @@ func GetSSHKey(privatekey *rsa.PrivateKey) (ssh.PublicKey, error) {
 // MarshalSSHPublicKey marshals SSH public key to the OpenSSH format so it can be used for authorized_keys file.
 func MarshalSSHPublicKey(key ssh.PublicKey) []byte {
 	return ssh.MarshalAuthorizedKey(key)
+}
+
+// SSHPublicKeyFromBytes reads an SSH public key from bytes.
+func SSHPublicKeyFromBytes(b []byte) (ssh.PublicKey, error) {
+	key, _, _, _, err := ssh.ParseAuthorizedKey(b)
+	return key, err
+}
+
+// SSHPublicKeyFromFile reads an SSH public key from a PEM file.
+func SSHPublicKeyFromFile(path string) (ssh.PublicKey, error) {
+	pemStat, statErr := os.Stat(path)
+	if statErr != nil {
+		return nil, errors.Wrap(statErr, "failed looking up the SSH key file")
+	}
+	if !pemStat.Mode().IsRegular() {
+		return nil, fmt.Errorf("SSH key file path must point to a regular file")
+	}
+	pemFileBytes, readErr := ioutil.ReadFile(path)
+	if readErr != nil {
+		return nil, errors.Wrap(readErr, "failed reading the SSH key file")
+	}
+	key, _, _, _, parseErr := ssh.ParseAuthorizedKey(pemFileBytes)
+	return key, parseErr
 }

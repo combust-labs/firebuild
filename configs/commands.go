@@ -78,7 +78,7 @@ func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringArrayVar(&c.EnvFiles, "env-file", []string{}, "Full path to an environment file to apply to the VMM during bootstrap, multiple OK")
 		c.flagSet.StringToStringVar(&c.EnvVars, "env", map[string]string{}, "Additional environment variables to apply to the VMM during bootstrap, multiple OK")
 		c.flagSet.StringVar(&c.From, "from", "", "The image to launch from, for example: tests/postgres:13")
-		c.flagSet.StringVar(&c.IdentityFile, "identity-file", "", "SSH public key to deploy to the machine during bootstrap")
+		c.flagSet.StringVar(&c.IdentityFile, "identity-file", "", "Full path to the SSH public key to deploy to the machine during bootstrap, must be regular file")
 		c.flagSet.StringVar(&c.Hostname, "hostname", "vmm", "Hostname to apply to the VMM during bootstrap")
 	}
 	return c.flagSet

@@ -11,10 +11,14 @@ import (
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/naming"
+	"github.com/combust-labs/firebuild/pkg/strategy"
+	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
+	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
 )
 
 /*
@@ -106,8 +110,31 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	})
 
+	strategyPublicKeys := []ssh.PublicKey{}
+	if commandConfig.IdentityFile != "" {
+		sshPublicKey, readErr := utils.SSHPublicKeyFromFile(commandConfig.IdentityFile)
+		if readErr != nil {
+			rootLogger.Error("failed reading an SSH key configured with --identity-file", "reason", readErr)
+			os.Exit(1)
+		}
+		strategyPublicKeys = append(strategyPublicKeys, sshPublicKey)
+	}
+
+	strategyConfig := &strategy.SSHKeyInjectingHandlerConfig{
+		Chroot:         jailingFcConfig.JailerChrootDirectory(),
+		RootfsFileName: filepath.Base(fileSystemSource),
+		SSHUser:        machineConfig.MachineSSHUser,
+		PublicKeys:     strategyPublicKeys,
+	}
+
+	strategy := configs.DefaultFirectackerStrategy(machineConfig).
+		AddRequirements(func() *arbitrary.HandlerPlacement {
+			return arbitrary.NewHandlerPlacement(strategy.
+				NewSSHKeyInjectingHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
+		})
+
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
-		// WithHandlersAdapter(strategy). // TODO: will need this back!
+		WithHandlersAdapter(strategy).
 		WithRootFsHostPath(fileSystemSource).
 		WithVethIfaceName(vethIfaceName)
 
