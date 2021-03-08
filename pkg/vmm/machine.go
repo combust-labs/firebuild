@@ -22,6 +22,8 @@ type StartedMachine interface {
 	Stop(context.Context, remote.ConnectedClient) StoppedOK
 	// StopAndWait stops the VMM and waits for the VMM to stop, remote connected client may be nil.
 	StopAndWait(context.Context, remote.ConnectedClient)
+	// Wait awaits for the VMM exit.
+	Wait(context.Context)
 }
 
 type defaultStartedMachine struct {
@@ -93,6 +95,11 @@ func (m *defaultStartedMachine) StopAndWait(ctx context.Context, remoteClient re
 	m.machine.Wait(ctx)
 }
 
+func (m *defaultStartedMachine) Wait(ctx context.Context) {
+	m.logger.Info("Waiting for machine to stop...")
+	m.machine.Wait(ctx)
+}
+
 func (m *defaultStartedMachine) cleanupCNINetwork() error {
 	m.logger.Info("cleaning up CNI network", "vmm-id", m.machine.Cfg.VMID, "iface-name", m.vethIfaceName, "netns", m.machine.Cfg.NetNS)
 	cniPlugin := libcni.NewCNIConfigWithCacheDir([]string{m.cniConfig.BinDir}, m.cniConfig.CacheDir, nil)
@@ -130,6 +137,9 @@ func (m *defaultStartedMachine) cleanupCNINetwork() error {
 			m.logger.Error("failed manual CNI directory removal",
 				"iface-cni-dir", ifaceCNIDir,
 				"reason", err)
+		} else {
+			m.logger.Info("manual CNI directory removal successful",
+				"iface-cni-dir", ifaceCNIDir)
 		}
 	}
 

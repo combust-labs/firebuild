@@ -3,8 +3,9 @@ package run
 import (
 	"context"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"time"
+	"syscall"
 
 	"github.com/combust-labs/firebuild/build"
 	"github.com/combust-labs/firebuild/build/commands"
@@ -12,6 +13,7 @@ import (
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
+	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
 )
 
@@ -77,7 +79,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	for _, validatingConfig := range validatingConfigs {
 		if err := validatingConfig.Validate(); err != nil {
-			rootLogger.Error("Configuration is invalid", "reason", err)
+			rootLogger.Error("configuration is invalid", "reason", err)
 			os.Exit(1)
 		}
 	}
@@ -116,7 +118,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	startedMachine, runErr := vmmProvider.Start(vmmCtx)
 	if runErr != nil {
-		vmmLogger.Error("Firecracker VMM did not start, build failed", "reason", runErr)
+		vmmLogger.Error("firecracker VMM did not start, build failed", "reason", runErr)
 		return
 	}
 
@@ -126,10 +128,28 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmLogger.Info("VMM running", "ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String())
 
-	<-time.After(time.Second * 30)
+	chanStopStatus := installSignalHandlers(context.Background(), vmmLogger, startedMachine)
 
-	startedMachine.StopAndWait(vmmCtx, nil)
+	startedMachine.Wait(context.Background())
 
-	vmmLogger.Info("Machine is stopped. Persisting the file system...")
+	vmmLogger.Info("machine is stopped", "gracefully", <-chanStopStatus)
 
+}
+
+func installSignalHandlers(ctx context.Context, logger hclog.Logger, m vmm.StartedMachine) <-chan bool {
+	chanStopped := make(chan bool, 1)
+	go func() {
+		// Clear selected default handlers installed by the firecracker SDK:
+		signal.Reset(os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		for {
+			switch s := <-c; {
+			case s == syscall.SIGTERM || s == os.Interrupt:
+				logger.Info("Caught SIGINT, requesting clean shutdown")
+				chanStopped <- m.Stop(ctx, nil)
+			}
+		}
+	}()
+	return chanStopped
 }
