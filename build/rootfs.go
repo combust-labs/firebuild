@@ -20,6 +20,9 @@ import (
 
 const etcDirectory = "/etc/firebuild"
 
+// RootfsFileName is the base name of the root file system, as stored on disk.
+const RootfsFileName = "rootfs"
+
 // Build represents the build operation.
 type Build interface {
 	AddInstructions(...interface{}) error

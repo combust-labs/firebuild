@@ -9,19 +9,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/combust-labs/firebuild/build"
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/reader"
 	"github.com/combust-labs/firebuild/build/stage"
-	"github.com/combust-labs/firebuild/build/utils"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/containers"
+	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/spf13/cobra"
 )
-
-/*
-	sudo /usr/local/go/bin/go run ./main.go baseos --dockerfile $(pwd)/baseos/_/alpine/3.13/Dockerfile
-	the authorized keys file must be 0400
-*/
 
 // Command is the build command declaration.
 var Command = &cobra.Command{
@@ -31,26 +27,14 @@ var Command = &cobra.Command{
 	Long:  ``,
 }
 
-type buildConfig struct {
-	Dockerfile        string
-	FSSizeMBs         int
-	MachineRootFSBase string
-}
-
 var (
-	commandConfig = new(buildConfig)
-	logConfig     = new(configs.LogConfig)
+	commandConfig = configs.NewBaseOSCommandConfig()
+	logConfig     = configs.NewLogginConfig()
 )
 
 func initFlags() {
-	Command.Flags().StringVar(&commandConfig.Dockerfile, "dockerfile", "", "Full path to the base OS Dockerfile")
-	Command.Flags().IntVar(&commandConfig.FSSizeMBs, "filesystem-size-mbs", 500, "File system size in megabytes")
-	Command.Flags().StringVar(&commandConfig.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside, required, can't be /")
-	// Log settings:
-	Command.Flags().StringVar(&logConfig.LogLevel, "log-level", "debug", "Log level")
-	Command.Flags().BoolVar(&logConfig.LogAsJSON, "log-as-json", false, "Log as JSON")
-	Command.Flags().BoolVar(&logConfig.LogColor, "log-color", false, "Log in color")
-	Command.Flags().BoolVar(&logConfig.LogForceColor, "log-force-color", false, "Force colored log output")
+	Command.Flags().AddFlagSet(commandConfig.FlagSet())
+	Command.Flags().AddFlagSet(logConfig.FlagSet())
 }
 
 func init() {
@@ -59,7 +43,7 @@ func init() {
 
 func run(cobraCommand *cobra.Command, _ []string) {
 
-	rootLogger := configs.NewLogger("baseos", logConfig)
+	rootLogger := logConfig.NewLogger("baseos")
 
 	if commandConfig.MachineRootFSBase == "" || commandConfig.MachineRootFSBase == "/" {
 		rootLogger.Error("--machine-rootfs-base is empty or /")
@@ -211,7 +195,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	rootLogger.Info("EXT4 file unmounted from mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
 
 	structuredBase := fromToBuild.ToStructuredFrom()
-	rootFsTargetFile := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), "root.ext4")
+	rootFsTargetFile := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), build.RootfsFileName)
 
 	if err := utils.MoveFile(rootFSFile, rootFsTargetFile); err != nil {
 		rootLogger.Error("failed moving produced file system", "reason", err)
