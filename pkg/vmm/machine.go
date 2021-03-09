@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/combust-labs/firebuild/configs"
@@ -16,6 +17,8 @@ import (
 
 // StartedMachine abstracts a started Firecracker VMM.
 type StartedMachine interface {
+	// Cleanup handles cleanup when the machine is stopped from outside of the controlling process.
+	Cleanup(chan bool)
 	// NetworkInterfaces returns network interfaces of a running VMM.
 	NetworkInterfaces() firecracker.NetworkInterfaces
 	// Stop stops the VMM, remote connected client may be nil.
@@ -27,12 +30,25 @@ type StartedMachine interface {
 }
 
 type defaultStartedMachine struct {
+	sync.Mutex
+
 	cniConfig     *configs.CNIConfig
 	machineConfig *configs.MachineConfig
 
 	logger        hclog.Logger
 	machine       *firecracker.Machine
 	vethIfaceName string
+
+	wasStopped bool
+}
+
+func (m *defaultStartedMachine) Cleanup(c chan bool) {
+	m.Lock()
+	defer m.Unlock()
+	if !m.wasStopped {
+		m.cleanupCNINetwork()
+	}
+	c <- StoppedGracefully
 }
 
 func (m *defaultStartedMachine) NetworkInterfaces() firecracker.NetworkInterfaces {
@@ -40,6 +56,14 @@ func (m *defaultStartedMachine) NetworkInterfaces() firecracker.NetworkInterface
 }
 
 func (m *defaultStartedMachine) Stop(ctx context.Context, remoteClient remote.ConnectedClient) StoppedOK {
+	m.Lock()
+	defer m.Unlock()
+
+	if !m.wasStopped {
+		m.wasStopped = true
+	} else {
+		return StoppedGracefully
+	}
 
 	if remoteClient != nil {
 		m.logger.Info("Closing remote client...")

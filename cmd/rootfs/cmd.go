@@ -2,7 +2,6 @@ package rootfs
 
 import (
 	"context"
-	"encoding/json"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -13,9 +12,12 @@ import (
 	"github.com/combust-labs/firebuild/build/reader"
 	"github.com/combust-labs/firebuild/build/resources"
 	"github.com/combust-labs/firebuild/build/stage"
+	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/remote"
+	"github.com/combust-labs/firebuild/pkg/storage"
+
 	"github.com/combust-labs/firebuild/pkg/strategy"
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
@@ -40,9 +42,7 @@ var (
 	jailingFcConfig  = configs.NewJailingFirecrackerConfig()
 	logConfig        = configs.NewLogginConfig()
 	machineConfig    = configs.NewMachineConfig()
-
-	rootFSCopyBufferSize = 4 * 1024 * 1024
-	rsaKeySize           = 4096
+	rsaKeySize       = 4096
 )
 
 func initFlags() {
@@ -52,6 +52,8 @@ func initFlags() {
 	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
+	// Storage provider flags:
+	cmd.AddStorageFlags(Command.Flags())
 }
 
 func init() {
@@ -65,9 +67,14 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	rootLogger := logConfig.NewLogger("rootfs")
 
+	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
+	if resolveErr != nil {
+		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
+		os.Exit(1)
+	}
+
 	validatingConfigs := []configs.ValidatingConfig{
 		jailingFcConfig,
-		machineConfig,
 	}
 
 	for _, validatingConfig := range validatingConfigs {
@@ -147,11 +154,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	structuredBase := buildContext.From().ToStructuredFrom()
-
-	// TODO: check that it exists and is regular file
-	sourceRootfs := filepath.Join(machineConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), naming.RootfsFileName)
-	buildRootfs := filepath.Join(tempDirectory, naming.RootfsFileName)
+	structuredFrom := buildContext.From().ToStructuredFrom()
 
 	// which resources from dependencies do we need:
 	requiredCopies := []commands.Copy{}
@@ -189,16 +192,45 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	}
 
-	if err := utils.CopyFile(sourceRootfs, buildRootfs, rootFSCopyBufferSize); err != nil {
+	// -- Command specific // END
+
+	// resolve kernel:
+	resolveKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
+		ID: machineConfig.MachineVMLinuxID,
+	})
+	if kernelResolveErr != nil {
+		rootLogger.Error("failed resolving kernel", "reason", kernelResolveErr)
+		os.Exit(1)
+	}
+
+	// resolve rootfs:
+	resolvedRootfs, rootfsResolveErr := storageImpl.FetchRootfs(&storage.RootfsLookup{
+		Org:     structuredFrom.Org(),
+		Image:   structuredFrom.OS(),
+		Version: structuredFrom.Version(),
+	})
+	if rootfsResolveErr != nil {
+		rootLogger.Error("failed resolving rootfs", "reason", rootfsResolveErr)
+		os.Exit(1)
+	}
+
+	// we do need to copy the rootfs file to a temp directory
+	// because the jailer directory indeed links to the target rootfs
+	// and changes are persisted
+	buildRootfs := filepath.Join(tempDirectory, naming.RootfsFileName)
+	if err := utils.CopyFile(resolvedRootfs.HostPath(), buildRootfs, cmd.RootFSCopyBufferSize); err != nil {
 		rootLogger.Error("failed copying requested rootfs to temp build location",
-			"source", sourceRootfs,
+			"source", resolvedRootfs.HostPath(),
 			"target", buildRootfs,
 			"reason", err)
 		cleanup.CallAll() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
 
-	// -- Command specific // END
+	// don't use resolvedRootfs below this point:
+	machineConfig.
+		WithKernelOverride(resolveKernel.HostPath()).
+		WithRootfsOverride(buildRootfs)
 
 	vethIfaceName := naming.GetRandomVethName()
 
@@ -206,8 +238,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmLogger.Info("buildiing VMM",
 		"dockerfile", commandConfig.Dockerfile,
-		"source-rootfs", buildRootfs,
-		"origin-rootfs", sourceRootfs,
+		"source-rootfs", machineConfig.RootfsOverride(),
 		"jail", jailingFcConfig.JailerChrootDirectory())
 
 	cleanup.Add(func() {
@@ -219,7 +250,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
 		Chroot:         jailingFcConfig.JailerChrootDirectory(),
-		RootfsFileName: filepath.Base(buildRootfs),
+		RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
 		SSHUser:        machineConfig.MachineSSHUser,
 		PublicKeys: []ssh.PublicKey{
 			sshPublicKey,
@@ -234,7 +265,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
 		WithHandlersAdapter(strategy).
-		WithRootFsHostPath(buildRootfs).
 		WithVethIfaceName(vethIfaceName)
 
 	vmmCtx, vmmCancel := context.WithCancel(context.Background())
@@ -313,44 +343,29 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		return
 	}
 
-	fsFileName := filepath.Base(buildRootfs)
-	fileSystemTargetDirectory := filepath.Join(machineConfig.MachineRootFSBase, "_builds", org, name, version)
-	fileSystemTarget := filepath.Join(fileSystemTargetDirectory, fsFileName)
-
-	if err := os.MkdirAll(filepath.Dir(fileSystemTarget), 0644); err != nil {
-		vmmLogger.Error("Failed creating final build target directory", "reason", err)
-		return
-	}
-
-	if copyErr := utils.MoveFile(filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root", fsFileName), fileSystemTarget); copyErr != nil {
-		vmmLogger.Error("Failed copying built file", "tag", commandConfig.Tag)
-		return
-	}
-
-	// write the metadata to a JSON file:
-	metadata := map[string]interface{}{
-		"labels":         buildContext.Metadata(),
-		"ports":          buildContext.ExposedPorts(),
-		"created-at-utc": time.Now().UTC().Unix(),
-		"build-context": map[string]interface{}{
-			"cni-config": cniConfig,
-			"config":     &commandConfig,
+	fsFileName := filepath.Base(machineConfig.RootfsOverride())
+	createdRootfsFile := filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root", fsFileName)
+	storeResult, storeErr := storageImpl.StoreRootfsFile(&storage.RootfsStore{
+		LocalPath: createdRootfsFile,
+		Metadata: map[string]interface{}{
+			"labels":         buildContext.Metadata(),
+			"ports":          buildContext.ExposedPorts(),
+			"created-at-utc": time.Now().UTC().Unix(),
+			"build-context": map[string]interface{}{
+				"cni-config": cniConfig,
+				"config":     &commandConfig,
+			},
 		},
-	}
+		Org:     org,
+		Image:   name,
+		Version: version,
+	})
 
-	metadataFileName := filepath.Join(fileSystemTargetDirectory, "metadata.json")
-
-	metadataJSONBytes, jsonErr := json.MarshalIndent(&metadata, "", "  ")
-	if jsonErr != nil {
-		vmmLogger.Error("Machine metadata could not be serialized to JSON", "metadata", metadata, "reason", jsonErr)
+	if storeErr != nil {
+		vmmLogger.Error("failed storing built rootfs", "reason", storeErr)
 		return
 	}
 
-	if writeErr := ioutil.WriteFile(metadataFileName, metadataJSONBytes, 0644); writeErr != nil {
-		vmmLogger.Error("Machine metadata not written to file", "metadata", metadata, "reason", jsonErr)
-		return
-	}
-
-	vmmLogger.Info("Build completed successfully. Rootfs tagged.", "storage-path", fileSystemTarget)
+	vmmLogger.Info("Build completed successfully. Rootfs tagged.", "output", storeResult)
 
 }

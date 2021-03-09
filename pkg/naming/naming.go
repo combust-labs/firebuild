@@ -5,6 +5,8 @@ import (
 )
 
 const (
+	// MetadataFileName is the name of the file in which the accompanying rootfs metadata is stored.
+	MetadataFileName = "metadata.json"
 	// RootfsEnvVarsFile is the location of the env variables
 	// extracted from the Docker build.
 	RootfsEnvVarsFile = "/etc/profile.d/rootfs-env.sh"

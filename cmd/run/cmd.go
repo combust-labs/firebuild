@@ -2,14 +2,17 @@ package run
 
 import (
 	"context"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
 	"github.com/combust-labs/firebuild/build/commands"
+	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/naming"
+	"github.com/combust-labs/firebuild/pkg/storage"
 	"github.com/combust-labs/firebuild/pkg/strategy"
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
@@ -19,23 +22,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 )
-
-/*
-	sudo /usr/local/go/bin/go run ./main.go run \
-		--binary-firecracker=$(readlink /usr/bin/firecracker) \
-		--binary-jailer=$(readlink /usr/bin/jailer) \
-		--chroot-base=/srv/jailer \
-		--from=tests/postgres:13 \
-		--machine-cni-network-name=alpine \
-		--machine-rootfs-base=/firecracker/rootfs \
-		--machine-ssh-user=debian \
-		--machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
-		--hostname=run-command-test \
-		--env='VAR1=value1' \
-		--env='VAR2=value2' \
-		--env='VAR3=value3' \
-		--log-as-json
-*/
 
 // Command is the build command declaration.
 var Command = &cobra.Command{
@@ -61,6 +47,8 @@ func initFlags() {
 	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
+	// Storage provider flags:
+	cmd.AddStorageFlags(Command.Flags())
 }
 
 func init() {
@@ -74,15 +62,28 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	rootLogger := logConfig.NewLogger("run")
 
-	if err := machineConfig.Validate(); err != nil {
-		rootLogger.Error("Configuration is invalid", "reason", err)
+	tempDirectory, err := ioutil.TempDir("", "")
+	if err != nil {
+		rootLogger.Error("Failed creating temporary run directory", "reason", err)
+		os.Exit(1)
+	}
+
+	cleanup.Add(func() {
+		rootLogger.Info("cleaning up temp build directory")
+		if err := os.RemoveAll(tempDirectory); err != nil {
+			rootLogger.Info("temp build directory removal status", "error", err)
+		}
+	})
+
+	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
+	if resolveErr != nil {
+		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
 		os.Exit(1)
 	}
 
 	validatingConfigs := []configs.ValidatingConfig{
 		commandConfig,
 		jailingFcConfig,
-		machineConfig,
 	}
 
 	for _, validatingConfig := range validatingConfigs {
@@ -92,17 +93,51 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	}
 
+	// resolve kernel:
+	resolveKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
+		ID: machineConfig.MachineVMLinuxID,
+	})
+	if kernelResolveErr != nil {
+		rootLogger.Error("failed resolving kernel", "reason", kernelResolveErr)
+		os.Exit(1)
+	}
+
+	// resolve rootfs:
+	from := commands.From{BaseImage: commandConfig.From}
+	structuredFrom := from.ToStructuredFrom()
+	resolvedRootfs, rootfsResolveErr := storageImpl.FetchRootfs(&storage.RootfsLookup{
+		Org:     structuredFrom.Org(),
+		Image:   structuredFrom.OS(),
+		Version: structuredFrom.Version(),
+	})
+	if rootfsResolveErr != nil {
+		rootLogger.Error("failed resolving rootfs", "reason", rootfsResolveErr)
+		os.Exit(1)
+	}
+
+	// we do need to copy the rootfs file to a temp directory
+	// because the jailer directory indeed links to the target rootfs
+	// and changes are persisted
+	runRootfs := filepath.Join(tempDirectory, naming.RootfsFileName)
+	if err := utils.CopyFile(resolvedRootfs.HostPath(), runRootfs, cmd.RootFSCopyBufferSize); err != nil {
+		rootLogger.Error("failed copying requested rootfs to temp build location",
+			"source", resolvedRootfs.HostPath(),
+			"target", runRootfs,
+			"reason", err)
+		cleanup.CallAll() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+
+	// don't use resolvedRootfs below this point:
+	machineConfig.
+		WithKernelOverride(resolveKernel.HostPath()).
+		WithRootfsOverride(runRootfs)
+
 	vmmEnvironment, envErr := commandConfig.MergedEnvironment()
 	if envErr != nil {
 		rootLogger.Error("failed merging environment", "reason", envErr)
 		os.Exit(1)
 	}
-
-	from := commands.From{BaseImage: commandConfig.From}
-	structuredFrom := from.ToStructuredFrom()
-
-	fileSystemSource := filepath.Join(machineConfig.MachineRootFSBase, "_builds",
-		structuredFrom.Org(), structuredFrom.OS(), structuredFrom.Version(), naming.RootfsFileName)
 
 	vethIfaceName := naming.GetRandomVethName()
 
@@ -110,7 +145,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmLogger.Info("running VMM",
 		"from", commandConfig.From,
-		"source-rootfs", fileSystemSource,
+		"source-rootfs", machineConfig.RootfsOverride(),
 		"jail", jailingFcConfig.JailerChrootDirectory())
 
 	cleanup.Add(func() {
@@ -132,7 +167,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
 		Chroot:         jailingFcConfig.JailerChrootDirectory(),
-		RootfsFileName: filepath.Base(fileSystemSource),
+		RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
 		SSHUser:        machineConfig.MachineSSHUser,
 
 		// VMM settings:
@@ -149,7 +184,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
 		WithHandlersAdapter(strategy).
-		WithRootFsHostPath(fileSystemSource).
 		WithVethIfaceName(vethIfaceName)
 
 	vmmCtx, vmmCancel := context.WithCancel(context.Background())
@@ -172,12 +206,13 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	chanStopStatus := installSignalHandlers(context.Background(), vmmLogger, startedMachine)
 
 	startedMachine.Wait(context.Background())
+	startedMachine.Cleanup(chanStopStatus)
 
 	vmmLogger.Info("machine is stopped", "gracefully", <-chanStopStatus)
 
 }
 
-func installSignalHandlers(ctx context.Context, logger hclog.Logger, m vmm.StartedMachine) <-chan bool {
+func installSignalHandlers(ctx context.Context, logger hclog.Logger, m vmm.StartedMachine) chan bool {
 	chanStopped := make(chan bool, 1)
 	go func() {
 		// Clear selected default handlers installed by the firecracker SDK:

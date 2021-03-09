@@ -38,47 +38,75 @@ EOF
 
 ## Build the base operating system root file system
 
-Build a base operating system root file system. For example, Alpine Linux 3.13:
+Build a base operating system root file system. For example, Debian Buster slim:
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go baseos \
-    --dockerfile $(pwd)/baseos/_/alpine/3.13/Dockerfile \
-    --machine-rootfs-base=/firecracker/rootfs
+    --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile \
+    --storage.provider=directory \
+    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs
 ```
+
+Because the `baseos` root file system is built completely with Docker, there is no need to configure the kernel storage.
 
 ### Why
 
 TODO: explain why is the base operating system rootfs required.
 
-### How
-
-TODO: describe the process.
-
-#### Target directory
-
-TODO: describe how is the final directory path contructed.
-
-## Build an application VMM from a Dockerfile
-
-This will fail because the Dockerfile uses the `ADD` command. To succeed, clone the owning repository locally and reference the local file. Eventually, use the `git+http(s)://` URL scheme.
-
-This example assumes that SSH agent is started and the relevant version SSH key is in the agent.
+## Create a Postgres 13 VMM rootfs from Buster Dockerfile
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go rootfs \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
-    --dockerfile=https://raw.githubusercontent.com/hashicorp/docker-consul/master/0.X/Dockerfile \
+    --dockerfile=git+https://github.com/docker-library/postgres.git:/13/Dockerfile \
+    --storage.provider=directory \
+    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage.provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --machine-cni-network-name=machine-builds \
-    --machine-rootfs-base=/firecracker/rootfs \
-    --machine-ssh-user=alpine \
-    --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
-    --init-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
-    --tag=tests/consul:1.9.3
+    --machine-ssh-user=debian \
+    --machine-vmlinux-id=vmlinux-v5.8 \
+    --pre-build-command='chmod 1777 /tmp' \
+    --log-as-json \
+    --resources-mem=512 \
+    --tag=tests/postgres:13
 ```
 
-## git+http(s):// URL
+TODO: revisit the paragraph below
+
+This service will not start automatically because the Postgres server requires an additional `export POSTGRES_PASSWORD=...` environment variable in the `/etc/firebuild/cmd.env` file. Right now, one needs to SSH to the VMM, `sudo echo 'export POSTGRES_PASSWORD' >> /etc/firebuild/cmd.env` and `sudo service DockerEntrypoint.sh start` to start the database.
+
+## Run the VMM from the resulting tag
+
+Once the root file system is built, start the VMM:
+
+```sh
+sudo /usr/local/go/bin/go run ./main.go run \
+    --binary-firecracker=$(readlink /usr/bin/firecracker) \
+    --binary-jailer=$(readlink /usr/bin/jailer) \
+    --chroot-base=/srv/jailer \
+    --storage.provider=directory \
+    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage.provider.directory.kernel-storage-root=/firecracker/vmlinux \
+    --from=tests/postgres:13 \
+    --machine-cni-network-name=alpine \
+    --machine-ssh-user=debian \
+    --machine-vmlinux-id=vmlinux-v5.8
+```
+
+### Additional settings
+
+- `--identity-file`: full path to the publish SSH key to deploy to the running VMM
+- `--env`: environment variable to deploy to configure the VMM with, multiple OK, format `--env=VAR_NAME=value`
+- `--env-file`: full path to the environment file, multiple OK
+- `--hostname`: hostname to apply to the VMM
+
+### Environment merging
+
+The final environment variables are written to `/etc/profile.d/run-env.sh` file. All file specified with `--env-file` are merged first in the order of occurrcence, variables specified with `--env` are merged last.
+
+## Dockerfile git+http(s):// URL
 
 It's possible to reference a `Dockerfile` residing in the git repository available under a HTTP(s) URL. Here's an example:
 
@@ -88,10 +116,12 @@ sudo /usr/local/go/bin/go run ./main.go rootfs \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
     --dockerfile=git+https://github.com/hashicorp/docker-consul.git:/0.X/Dockerfile#master \
+    --storage.provider=directory \
+    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage.provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --machine-cni-network-name=machine-builds \
-    --machine-rootfs-base=/firecracker/rootfs \
     --machine-ssh-user=alpine \
-    --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
+    --machine-vmlinux-id=vmlinux-v5.8 \
     --post-build-command='chmod -x /etc/init.d/sshd' \
     --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
     --log-as-json \
@@ -129,7 +159,7 @@ Git repositories support file modes and the files from the `ADD` and `COPY` dire
 }
 ```
 
-## Supported URL formats
+## Supported Dockerfile URL formats
 
 - `http://` and `https://` for direct paths to the `Dockerfile`, these can handle single file only and do not attempt loading any resources handled by `ADD` / `COPY` commands, the server must be capable of responding to `HEAD` and `GET` http requests, more details in `Caveats when building from the URL` further in this document
 - special `git+http://` and `git+https://`, documented above
@@ -168,10 +198,12 @@ Build v0.2.8 using git repository link, leave SSH access on:
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
     --dockerfile=git+https://github.com/grepplabs/kafka-proxy.git:/Dockerfile#v0.2.8 \
+    --storage.provider=directory \
+    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage.provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --machine-cni-network-name=machine-builds \
-    --machine-rootfs-base=/firecracker/rootfs \
     --machine-ssh-user=alpine \
-    --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
+    --machine-vmlinux-id=vmlinux-v5.8 \
     --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
     --log-as-json \
     --tag=tests/kafka-proxy:0.2.8 \
@@ -186,42 +218,3 @@ Excluded from the license:
 
 - `build/env/expand.go`: sourced from golang standard library
 - `remote/scp.go`: sourced from Terraform SSH communicator
-
-## Other examples
-
-### Postgres 13 with Debian Buster slim
-
-```sh
-/usr/local/go/bin/go run ./main.go rootfs \
-    --binary-firecracker=$(readlink /usr/bin/firecracker) \
-    --binary-jailer=$(readlink /usr/bin/jailer) \
-    --chroot-base=/srv/jailer \
-    --dockerfile=git+https://github.com/docker-library/postgres.git:/13/Dockerfile \
-    --machine-cni-network-name=machine-builds \
-    --machine-rootfs-base=/firecracker/rootfs \
-    --machine-ssh-user=debian \
-    --machine-vmlinux=/firecracker/vmlinux/vmlinux-v5.8 \
-    --pre-build-command='chmod 1777 /tmp' \
-    --log-as-json \
-    --resources-mem=512 \
-    --tag=tests/postgres:13 \
-    --service-file-installer=$(pwd)/baseos/_/debian/sysvinit.service.sh
-```
-
-Once the root file system is built, start the VMM:
-
-```sh
-sudo $GOPATH/bin/firectl \
-    --jailer=/usr/bin/jailer \
-    --exec-file=$(readlink /usr/bin/firecracker) \
-    --id=postgres1 \
-    --chroot-base-dir=/srv/jailer \
-    --kernel=/firecracker/vmlinux/vmlinux-v5.8 \
-    --root-drive=/firecracker/rootfs/_builds/tests/postgres/13/rootfs \
-    --cni-network=${CNI_NETWORK_NAME} \
-    --veth-iface-name=postgres1 \
-    --ncpus=1 \
-    --memory=256
-```
-
-This service will not start automatically because the Postgres server requires an additional `export POSTGRES_PASSWORD=...` environment variable in the `/etc/firebuild/cmd.env` file. Right now, one needs to SSH to the VMM, `sudo echo 'export POSTGRES_PASSWORD' >> /etc/firebuild/cmd.env` and `sudo service DockerEntrypoint.sh start` to start the database.

@@ -8,15 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-
-	"github.com/pkg/errors"
 )
 
 // CheckIfExistsAndIsDirectory checks is a path points at a directory.
 func CheckIfExistsAndIsDirectory(path string) (fs.FileInfo, error) {
 	stat, statErr := os.Stat(path)
 	if statErr != nil {
-		return nil, errors.Wrap(statErr, "stat failed")
+		return nil, statErr // don't wrap OS errors:
 	}
 	if !stat.Mode().IsDir() {
 		return nil, fmt.Errorf("not a directory: '%s'", path)
@@ -28,7 +26,7 @@ func CheckIfExistsAndIsDirectory(path string) (fs.FileInfo, error) {
 func CheckIfExistsAndIsRegular(path string) (fs.FileInfo, error) {
 	stat, statErr := os.Stat(path)
 	if statErr != nil {
-		return nil, errors.Wrap(statErr, "stat failed")
+		return nil, statErr // don't wrap OS errors:
 	}
 	if !stat.Mode().IsRegular() {
 		return nil, fmt.Errorf("not a regular file: '%s'", path)
@@ -111,7 +109,7 @@ func MoveFile(source, target string) error {
 	if !sourceStat.Mode().IsRegular() {
 		return fmt.Errorf("source is not regular file")
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0664); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
 

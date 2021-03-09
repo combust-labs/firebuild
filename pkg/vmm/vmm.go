@@ -27,7 +27,6 @@ type Provider interface {
 	Start(context.Context) (StartedMachine, error)
 
 	WithHandlersAdapter(firecracker.HandlersAdapter) Provider
-	WithRootFsHostPath(string) Provider
 	WithVethIfaceName(string) Provider
 }
 
@@ -39,7 +38,6 @@ type defaultProvider struct {
 	handlersAdapter firecracker.HandlersAdapter
 	logger          hclog.Logger
 	machine         *firecracker.Machine
-	rootFsHostPath  string
 	vethIfaceName   string
 }
 
@@ -52,7 +50,6 @@ func NewDefaultProvider(cniConfig *configs.CNIConfig, jailingFcConfig *configs.J
 
 		handlersAdapter: configs.DefaultFirectackerStrategy(machineConfig),
 		logger:          hclog.Default(),
-		rootFsHostPath:  machineConfig.MachineRootFSBase,
 		vethIfaceName:   configs.DefaultVethIfaceName,
 	}
 }
@@ -65,7 +62,6 @@ func (p *defaultProvider) Start(ctx context.Context) (StartedMachine, error) {
 	fcConfig := configs.NewFcConfigProvider(p.jailingFcConfig, p.machineConfig).
 		WithHandlersAdapter(p.handlersAdapter).
 		WithVethIfaceName(p.vethIfaceName).
-		WithRootFsHostPath(p.rootFsHostPath).
 		ToSDKConfig()
 	m, err := firecracker.NewMachine(ctx, fcConfig, machineOpts...)
 	if err != nil {
@@ -86,11 +82,6 @@ func (p *defaultProvider) Start(ctx context.Context) (StartedMachine, error) {
 
 func (p *defaultProvider) WithHandlersAdapter(input firecracker.HandlersAdapter) Provider {
 	p.handlersAdapter = input
-	return p
-}
-
-func (p *defaultProvider) WithRootFsHostPath(input string) Provider {
-	p.rootFsHostPath = input
 	return p
 }
 
