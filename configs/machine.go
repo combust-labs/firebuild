@@ -10,6 +10,7 @@ type MachineConfig struct {
 
 	MachineCNINetworkName        string
 	MachineCPUTemplate           string
+	MachineHTEnabled             bool
 	MachineKernelArgs            string
 	MachineRootDrivePartUUID     string
 	MachineSSHEnableAgentForward bool
@@ -22,6 +23,7 @@ type MachineConfig struct {
 
 	ShutdownGracefulTimeoutSeconds int
 
+	daemonize      bool
 	kernelOverride string
 	rootfsOverride string
 }
@@ -39,6 +41,7 @@ func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.StringVar(&c.MachineCNINetworkName, "machine-cni-network-name", "", "CNI network within which the build should run. It's recommended to use a dedicated network for build process")
 		c.flagSet.StringVar(&c.MachineCPUTemplate, "machine-cpu-template", "", "CPU template (empty, C2 or T3)")
+		c.flagSet.BoolVar(&c.MachineHTEnabled, "machine-ht-enabled", false, "When specified, enable hyper-threading")
 		c.flagSet.StringVar(&c.MachineKernelArgs, "machine-kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
 		c.flagSet.StringVar(&c.MachineRootDrivePartUUID, "machine-root-drive-partuuid", "", "Root drive part UUID")
 		c.flagSet.BoolVar(&c.MachineSSHEnableAgentForward, "machine-ssh-enable-agent-forward", false, "If set, enables SSH agent forward")
@@ -53,6 +56,10 @@ func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
+func (c *MachineConfig) Daemonize() bool {
+	return c.daemonize
+}
+
 func (c *MachineConfig) KernelOverride() string {
 	return c.kernelOverride
 }
@@ -61,6 +68,10 @@ func (c *MachineConfig) RootfsOverride() string {
 	return c.rootfsOverride
 }
 
+func (c *MachineConfig) WithDaemonize(input bool) *MachineConfig {
+	c.daemonize = input
+	return c
+}
 func (c *MachineConfig) WithKernelOverride(input string) *MachineConfig {
 	c.kernelOverride = input
 	return c

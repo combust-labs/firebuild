@@ -149,7 +149,7 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 		MachineCfg: models.MachineConfiguration{
 			VcpuCount:   firecracker.Int64(c.machineConfig.ResourcesCPU),
 			CPUTemplate: models.CPUTemplate(c.machineConfig.MachineCPUTemplate),
-			HtEnabled:   firecracker.Bool(false),
+			HtEnabled:   firecracker.Bool(c.machineConfig.MachineHTEnabled),
 			MemSizeMib:  firecracker.Int64(c.machineConfig.ResourcesMem),
 		},
 		JailerCfg: &firecracker.JailerConfig{
@@ -160,7 +160,7 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 			ExecFile:      c.jailingFcConfig.BinaryFirecracker,
 			JailerBinary:  c.jailingFcConfig.BinaryJailer,
 			ChrootBaseDir: c.jailingFcConfig.ChrootBase,
-			Daemonize:     false,
+			Daemonize:     c.machineConfig.Daemonize(),
 			ChrootStrategy: func() firecracker.HandlersAdapter {
 				if c.fcStrategy == nil {
 					return DefaultFirectackerStrategy(c.machineConfig)
