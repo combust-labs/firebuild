@@ -1,6 +1,7 @@
 package configs
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/combust-labs/firebuild/pkg/utils"
@@ -72,6 +73,8 @@ type RunCommandConfig struct {
 	From         string
 	IdentityFile string
 	Hostname     string
+
+	RunCache string
 }
 
 // NewRunCommandConfig returns new command configuration.
@@ -88,6 +91,7 @@ func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.From, "from", "", "The image to launch from, for example: tests/postgres:13")
 		c.flagSet.StringVar(&c.IdentityFile, "identity-file", "", "Full path to the SSH public key to deploy to the machine during bootstrap, must be regular file")
 		c.flagSet.StringVar(&c.Hostname, "hostname", "vmm", "Hostname to apply to the VMM during bootstrap")
+		c.flagSet.StringVar(&c.RunCache, "run-cache", "/var/lib/firebuild", "Firebuild run cache directory")
 	}
 	return c.flagSet
 }
@@ -125,6 +129,9 @@ func (c *RunCommandConfig) Validate() error {
 		if _, statErr := utils.CheckIfExistsAndIsRegular(envFile); statErr != nil {
 			return errors.Wrapf(statErr, "environment file '%s' stat error", envFile)
 		}
+	}
+	if c.RunCache == "" || c.RunCache == "/" {
+		return fmt.Errorf("run cache cannot be empty or /")
 	}
 	return nil
 }

@@ -2,7 +2,6 @@ package run
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -62,19 +61,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	rootLogger := logConfig.NewLogger("run")
 
-	tempDirectory, err := ioutil.TempDir("", "")
-	if err != nil {
-		rootLogger.Error("Failed creating temporary run directory", "reason", err)
-		os.Exit(1)
-	}
-
-	cleanup.Add(func() {
-		rootLogger.Info("cleaning up temp build directory")
-		if err := os.RemoveAll(tempDirectory); err != nil {
-			rootLogger.Info("temp build directory removal status", "error", err)
-		}
-	})
-
 	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
 	if resolveErr != nil {
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
@@ -92,6 +78,25 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			os.Exit(1)
 		}
 	}
+
+	// create cache directory:
+	if err := os.MkdirAll(commandConfig.RunCache, 0755); err != nil {
+		rootLogger.Error("failed creating run cache directory", "reason", err)
+		os.Exit(1)
+	}
+
+	cacheDirectory := filepath.Join(commandConfig.RunCache, jailingFcConfig.VMMID())
+	if err := os.Mkdir(cacheDirectory, 0755); err != nil {
+		rootLogger.Error("failed creating run VMM cache directory", "reason", err)
+		os.Exit(1)
+	}
+
+	cleanup.Add(func() {
+		rootLogger.Info("cleaning up temp build directory")
+		if err := os.RemoveAll(cacheDirectory); err != nil {
+			rootLogger.Info("temp build directory removal status", "error", err)
+		}
+	})
 
 	// resolve kernel:
 	resolveKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
@@ -118,7 +123,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	// we do need to copy the rootfs file to a temp directory
 	// because the jailer directory indeed links to the target rootfs
 	// and changes are persisted
-	runRootfs := filepath.Join(tempDirectory, naming.RootfsFileName)
+	runRootfs := filepath.Join(cacheDirectory, naming.RootfsFileName)
 	if err := utils.CopyFile(resolvedRootfs.HostPath(), runRootfs, cmd.RootFSCopyBufferSize); err != nil {
 		rootLogger.Error("failed copying requested rootfs to temp build location",
 			"source", resolvedRootfs.HostPath(),
@@ -201,6 +206,14 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	ifaceStaticConfig := startedMachine.NetworkInterfaces()[0].StaticConfiguration
 
 	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IPAddr.IP.String())
+
+	if commandConfig.Daemonize {
+		vmmLogger.Info("VMM running as a daemon",
+			"ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String(),
+			"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
+			"cache-dir", cacheDirectory)
+		os.Exit(0) // don't trigger defers
+	}
 
 	vmmLogger.Info("VMM running", "ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String())
 
