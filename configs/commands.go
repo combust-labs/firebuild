@@ -1,6 +1,7 @@
 package configs
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/combust-labs/firebuild/pkg/utils"
@@ -31,6 +32,31 @@ func (c *BaseOSCommandConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
+type KillCommandConfig struct {
+	flagBase
+	ValidatingConfig
+
+	VMMID string
+}
+
+func NewKillCommandConfig() *KillCommandConfig {
+	return &KillCommandConfig{}
+}
+
+func (c *KillCommandConfig) FlagSet() *pflag.FlagSet {
+	if c.initFlagSet() {
+		c.flagSet.StringVar(&c.VMMID, "vmm-id", "", "ID of the VMM to kill")
+	}
+	return c.flagSet
+}
+
+func (c *KillCommandConfig) Validate() error {
+	if c.VMMID == "" {
+		return fmt.Errorf("--vmm-id can't be empty")
+	}
+	return nil
+}
+
 // RootfsCommandConfig is the rootfs command configuration.
 type RootfsCommandConfig struct {
 	flagBase
@@ -59,6 +85,35 @@ func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
 	}
 	return c.flagSet
+}
+
+// RunCacheConfig contains the run cache settings.
+type RunCacheConfig struct {
+	flagBase
+	ValidatingConfig
+
+	RunCache string
+}
+
+// NewRunCommandConfig returns new command configuration.
+func NewRunCacheConfig() *RunCacheConfig {
+	return &RunCacheConfig{}
+}
+
+// FlagSet returns an instance of the flag set for the configuration.
+func (c *RunCacheConfig) FlagSet() *pflag.FlagSet {
+	if c.initFlagSet() {
+		c.flagSet.StringVar(&c.RunCache, "run-cache", "/var/lib/firebuild", "Firebuild run cache directory")
+	}
+	return c.flagSet
+}
+
+// Validate validates the correctness of the configuration.
+func (c *RunCacheConfig) Validate() error {
+	if c.RunCache == "" || c.RunCache == "/" {
+		return fmt.Errorf("run cache cannot be empty or /")
+	}
+	return nil
 }
 
 // RunCommandConfig is the run command configuration.

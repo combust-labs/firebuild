@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/combust-labs/firebuild/cmd/baseos"
+	"github.com/combust-labs/firebuild/cmd/kill"
 	"github.com/combust-labs/firebuild/cmd/rootfs"
 	"github.com/combust-labs/firebuild/cmd/run"
 	"github.com/spf13/cobra"
@@ -22,6 +23,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(baseos.Command)
+	rootCmd.AddCommand(kill.Command)
 	rootCmd.AddCommand(rootfs.Command)
 	rootCmd.AddCommand(run.Command)
 }

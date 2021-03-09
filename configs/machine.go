@@ -56,27 +56,34 @@ func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
+// Daemonize returns the configured daemonize setting.
 func (c *MachineConfig) Daemonize() bool {
 	return c.daemonize
 }
 
+// KernelOverride returns the configured kernel setting.
 func (c *MachineConfig) KernelOverride() string {
 	return c.kernelOverride
 }
 
+// RootfsOverride returns the configured rootfs setting.
 func (c *MachineConfig) RootfsOverride() string {
 	return c.rootfsOverride
 }
 
+// WithDaemonize sets the daemonize setting.
 func (c *MachineConfig) WithDaemonize(input bool) *MachineConfig {
 	c.daemonize = input
 	return c
 }
+
+// WithKernelOverride sets the ketting setting.
 func (c *MachineConfig) WithKernelOverride(input string) *MachineConfig {
 	c.kernelOverride = input
 	return c
 }
 
+// WithRootfsOverride sets the rootfs setting.
 func (c *MachineConfig) WithRootfsOverride(input string) *MachineConfig {
 	c.rootfsOverride = input
 	return c

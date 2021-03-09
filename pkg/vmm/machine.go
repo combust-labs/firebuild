@@ -2,17 +2,14 @@ package vmm
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/cni"
 	"github.com/combust-labs/firebuild/pkg/remote"
-	"github.com/containernetworking/cni/libcni"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
-	"github.com/pkg/errors"
 )
 
 // StartedMachine abstracts a started Firecracker VMM.
@@ -21,6 +18,8 @@ type StartedMachine interface {
 	Cleanup(chan bool)
 	// NetworkInterfaces returns network interfaces of a running VMM.
 	NetworkInterfaces() firecracker.NetworkInterfaces
+	// PID returns the PID of the running VMM.
+	PID() (int, error)
 	// Stop stops the VMM, remote connected client may be nil.
 	Stop(context.Context, remote.ConnectedClient) StoppedOK
 	// StopAndWait stops the VMM and waits for the VMM to stop, remote connected client may be nil.
@@ -54,6 +53,10 @@ func (m *defaultStartedMachine) Cleanup(c chan bool) {
 
 func (m *defaultStartedMachine) NetworkInterfaces() firecracker.NetworkInterfaces {
 	return m.machine.Cfg.NetworkInterfaces
+}
+
+func (m *defaultStartedMachine) PID() (int, error) {
+	return m.machine.PID()
 }
 
 func (m *defaultStartedMachine) Stop(ctx context.Context, remoteClient remote.ConnectedClient) StoppedOK {
@@ -126,47 +129,9 @@ func (m *defaultStartedMachine) Wait(ctx context.Context) {
 }
 
 func (m *defaultStartedMachine) cleanupCNINetwork() error {
-	m.logger.Info("cleaning up CNI network", "vmm-id", m.machine.Cfg.VMID, "iface-name", m.vethIfaceName, "netns", m.machine.Cfg.NetNS)
-	cniPlugin := libcni.NewCNIConfigWithCacheDir([]string{m.cniConfig.BinDir}, m.cniConfig.CacheDir, nil)
-	networkConfig, err := libcni.LoadConfList(m.cniConfig.ConfDir, m.machineConfig.MachineCNINetworkName)
-	if err != nil {
-		return errors.Wrap(err, "LoadConfList failed")
-	}
-	if err := cniPlugin.DelNetworkList(context.Background(), networkConfig, &libcni.RuntimeConf{
-		ContainerID: m.machine.Cfg.VMID, // golang firecracker SDK uses the VMID, if VMID is set
-		NetNS:       m.machine.Cfg.NetNS,
-		IfName:      m.vethIfaceName,
-	}); err != nil {
-		return errors.Wrap(err, "DelNetworkList failed")
-	}
-
-	// clean up the CNI interface directory:
-	ifaceCNIDir := filepath.Join(m.cniConfig.CacheDir, m.machine.Cfg.VMID)
-	ifaceCNIDirStat, statErr := os.Stat(ifaceCNIDir)
-	if statErr != nil {
-		if os.IsNotExist(statErr) {
-			m.logger.Warn("expected the CNI directory for the CNI interface to be left for manual cleanup but it did not exist",
-				"iface-cni-dir", ifaceCNIDir,
-				"reason", statErr)
-		} else {
-			m.logger.Error("failed checking if the CNI directory for the CNI interface exists after cleanup",
-				"iface-cni-dir", ifaceCNIDir,
-				"reason", statErr)
-		}
-	}
-	if !ifaceCNIDirStat.IsDir() {
-		m.logger.Error("CNI directory path points to a file",
-			"iface-cni-dir", ifaceCNIDir)
-	} else {
-		if err := os.RemoveAll(ifaceCNIDir); err != nil {
-			m.logger.Error("failed manual CNI directory removal",
-				"iface-cni-dir", ifaceCNIDir,
-				"reason", err)
-		} else {
-			m.logger.Info("manual CNI directory removal successful",
-				"iface-cni-dir", ifaceCNIDir)
-		}
-	}
-
-	return nil
+	return cni.CleanupCNI(m.logger, m.cniConfig,
+		m.machine.Cfg.VMID,
+		m.vethIfaceName,
+		m.machine.Cfg.NetNS,
+		m.machineConfig.MachineCNINetworkName)
 }

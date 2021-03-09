@@ -107,6 +107,48 @@ sudo /usr/local/go/bin/go run ./main.go run \
 
 The final environment variables are written to `/etc/profile.d/run-env.sh` file. All file specified with `--env-file` are merged first in the order of occurrcence, variables specified with `--env` are merged last.
 
+## Terminating a daemonized VMM
+
+A VMM started with the `--daemonize` flag can be stopped in three ways:
+
+- by executing the `kill` tool command, this is a clean stop which will take care of all the necessry clean up
+- by executing `reboot` from inside of the VMM SSH connection; unclean stop, manual purge of the CNI cache, jailer directory, run cache and the veth link is needed
+- by executing the cURL HTTP against the VMM socket file; unclean stop, manual purge of the CNI cache, jailer directory, run cache and the veth link is needed
+
+### VMM kill command
+
+To get the VMM ID, look closely at the output of the `run ... --detached` command:
+
+```json
+{
+    "@level":"info",
+    "@message":"VMM running as a daemon",
+    "@module":"run",
+    "@timestamp":"2021-03-09T19:55:41.684488Z",
+    "cache-dir":"/var/lib/firebuild/831b7068f7924584b384260e8d262834",
+    "ip-address":"192.168.127.3",
+    "ip-net":"192.168.127.3/24",
+    "jailer-dir":"/srv/jailer/firecracker-v0.22.4-x86_64/831b7068f7924584b384260e8d262834",
+    "pid":17904,
+    "veth-name":"vethydMSApKfoDu",
+    "vmm-id":"831b7068f7924584b384260e8d262834"
+}
+```
+
+Copy the VMM ID from the output and run:
+
+```sh
+sudo /usr/local/go/bin/go run ./main.go kill \
+    --binary-firecracker=$(readlink /usr/bin/firecracker) \
+    --binary-jailer=$(readlink /usr/bin/jailer) \
+    --chroot-base=/srv/jailer \
+    --vmm-id=${VMMID}
+```
+
+### Purging remains of the VMMs stopped without the kill command
+
+TODO: purge command to be implemented
+
 ## Dockerfile git+http(s):// URL
 
 It's possible to reference a `Dockerfile` residing in the git repository available under a HTTP(s) URL. Here's an example:
