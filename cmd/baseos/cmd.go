@@ -2,7 +2,6 @@ package baseos
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
 	"io/ioutil"
 	"os"
@@ -12,9 +11,11 @@ import (
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/reader"
 	"github.com/combust-labs/firebuild/build/stage"
+	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/containers"
 	"github.com/combust-labs/firebuild/pkg/naming"
+	"github.com/combust-labs/firebuild/pkg/storage"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/spf13/cobra"
 )
@@ -35,6 +36,8 @@ var (
 func initFlags() {
 	Command.Flags().AddFlagSet(commandConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
+	// Storage provider flags:
+	cmd.AddStorageFlags(Command.Flags())
 }
 
 func init() {
@@ -44,11 +47,6 @@ func init() {
 func run(cobraCommand *cobra.Command, _ []string) {
 
 	rootLogger := logConfig.NewLogger("baseos")
-
-	if commandConfig.MachineRootFSBase == "" || commandConfig.MachineRootFSBase == "/" {
-		rootLogger.Error("--machine-rootfs-base is empty or /")
-		os.Exit(1)
-	}
 
 	dockerStat, statErr := os.Stat(commandConfig.Dockerfile)
 	if statErr != nil {
@@ -60,11 +58,18 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
+	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
+	if resolveErr != nil {
+		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
+		os.Exit(1)
+	}
+
 	tempDirectory, err := ioutil.TempDir("", "")
 	if err != nil {
 		rootLogger.Error("failed creating temporary build directory", "reason", err)
 		os.Exit(1)
 	}
+	defer os.RemoveAll(tempDirectory)
 
 	// we parse the file to establish the base operating system we build
 	// we must enforce some constants so we assume here
@@ -141,7 +146,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	rootLogger.Info("image ready, creating EXT4 root file system file", "os", fromToBuild.BaseImage)
 
-	rootFSFile := fmt.Sprintf("%s/rootfs.ext4", tempDirectory)
+	rootFSFile := filepath.Join(tempDirectory, naming.RootfsFileName)
+
 	if err := utils.CreateRootFSFile(rootFSFile, commandConfig.FSSizeMBs); err != nil {
 		rootLogger.Error("failed creating rootfs file", "reason", err)
 		os.RemoveAll(tempDirectory)
@@ -195,16 +201,19 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	rootLogger.Info("EXT4 file unmounted from mount dir", "rootfs", rootFSFile, "mount-dir", mountDir)
 
 	structuredBase := fromToBuild.ToStructuredFrom()
-	rootFsTargetFile := filepath.Join(commandConfig.MachineRootFSBase, structuredBase.Org(), structuredBase.OS(), structuredBase.Version(), naming.RootfsFileName)
 
-	if err := utils.MoveFile(rootFSFile, rootFsTargetFile); err != nil {
-		rootLogger.Error("failed moving produced file system", "reason", err)
+	storeResult, storeErr := storageImpl.StoreRootfsFile(&storage.RootfsStore{
+		LocalPath: rootFSFile,
+		Metadata:  map[string]interface{}{},
+		Org:       structuredBase.Org(),
+		Image:     structuredBase.OS(),
+		Version:   structuredBase.Version(),
+	})
+	if storeErr != nil {
+		rootLogger.Error("failed storing built rootfs", "reason", storeErr)
+		return
 	}
 
-	rootLogger.Info("Base file system built successfully", "final-rootfs", rootFsTargetFile)
-
-	if err := os.RemoveAll(tempDirectory); err != nil {
-		rootLogger.Error("failed cleaning up temp directory after build, trash left, clean up manually", "temp-directory", tempDirectory, "reason", err)
-	}
+	rootLogger.Info("Build completed successfully. Rootfs tagged.", "output", storeResult)
 
 }

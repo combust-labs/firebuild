@@ -23,25 +23,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-/*
-	sudo /usr/local/go/bin/go run ./main.go run \
-		--binary-firecracker=$(readlink /usr/bin/firecracker) \
-		--binary-jailer=$(readlink /usr/bin/jailer) \
-		--chroot-base=/srv/jailer \
-		--storage.provider=directory \
-		--storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
-		--storage.provider.directory.kernel-storage-root=/firecracker/vmlinux \
-		--from=tests/postgres:13 \
-		--machine-cni-network-name=alpine \
-		--machine-ssh-user=debian \
-		--machine-vmlinux-id=vmlinux-v5.8 \
-		--hostname=run-command-test \
-		--env='VAR1=value1' \
-		--env='VAR2=value2' \
-		--env='VAR3=value3' \
-		--log-as-json
-*/
-
 // Command is the build command declaration.
 var Command = &cobra.Command{
 	Use:   "run",

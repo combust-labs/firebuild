@@ -13,9 +13,8 @@ import (
 type BaseOSCommandConfig struct {
 	flagBase
 
-	Dockerfile        string
-	FSSizeMBs         int
-	MachineRootFSBase string
+	Dockerfile string
+	FSSizeMBs  int
 }
 
 // NewBaseOSCommandConfig returns new command configuration.
@@ -28,7 +27,6 @@ func (c *BaseOSCommandConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.StringVar(&c.Dockerfile, "dockerfile", "", "Full path to the base OS Dockerfile")
 		c.flagSet.IntVar(&c.FSSizeMBs, "filesystem-size-mbs", 500, "File system size in megabytes")
-		c.flagSet.StringVar(&c.MachineRootFSBase, "machine-rootfs-base", "", "Root directory where operating system file systems reside, required, can't be /")
 	}
 	return c.flagSet
 }
