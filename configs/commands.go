@@ -32,6 +32,31 @@ func (c *BaseOSCommandConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
+type KillCommandConfig struct {
+	flagBase
+	ValidatingConfig
+
+	VMMID string
+}
+
+func NewKillCommandConfig() *KillCommandConfig {
+	return &KillCommandConfig{}
+}
+
+func (c *KillCommandConfig) FlagSet() *pflag.FlagSet {
+	if c.initFlagSet() {
+		c.flagSet.StringVar(&c.VMMID, "vmm-id", "", "ID of the VMM to kill")
+	}
+	return c.flagSet
+}
+
+func (c *KillCommandConfig) Validate() error {
+	if c.VMMID == "" {
+		return fmt.Errorf("--vmm-id can't be empty")
+	}
+	return nil
+}
+
 // RootfsCommandConfig is the rootfs command configuration.
 type RootfsCommandConfig struct {
 	flagBase
@@ -62,6 +87,35 @@ func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
+// RunCacheConfig contains the run cache settings.
+type RunCacheConfig struct {
+	flagBase
+	ValidatingConfig
+
+	RunCache string
+}
+
+// NewRunCommandConfig returns new command configuration.
+func NewRunCacheConfig() *RunCacheConfig {
+	return &RunCacheConfig{}
+}
+
+// FlagSet returns an instance of the flag set for the configuration.
+func (c *RunCacheConfig) FlagSet() *pflag.FlagSet {
+	if c.initFlagSet() {
+		c.flagSet.StringVar(&c.RunCache, "run-cache", "/var/lib/firebuild", "Firebuild run cache directory")
+	}
+	return c.flagSet
+}
+
+// Validate validates the correctness of the configuration.
+func (c *RunCacheConfig) Validate() error {
+	if c.RunCache == "" || c.RunCache == "/" {
+		return fmt.Errorf("run cache cannot be empty or /")
+	}
+	return nil
+}
+
 // RunCommandConfig is the run command configuration.
 type RunCommandConfig struct {
 	flagBase
@@ -73,8 +127,6 @@ type RunCommandConfig struct {
 	From         string
 	IdentityFile string
 	Hostname     string
-
-	RunCache string
 }
 
 // NewRunCommandConfig returns new command configuration.
@@ -91,7 +143,6 @@ func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.From, "from", "", "The image to launch from, for example: tests/postgres:13")
 		c.flagSet.StringVar(&c.IdentityFile, "identity-file", "", "Full path to the SSH public key to deploy to the machine during bootstrap, must be regular file")
 		c.flagSet.StringVar(&c.Hostname, "hostname", "vmm", "Hostname to apply to the VMM during bootstrap")
-		c.flagSet.StringVar(&c.RunCache, "run-cache", "/var/lib/firebuild", "Firebuild run cache directory")
 	}
 	return c.flagSet
 }
@@ -129,9 +180,6 @@ func (c *RunCommandConfig) Validate() error {
 		if _, statErr := utils.CheckIfExistsAndIsRegular(envFile); statErr != nil {
 			return errors.Wrapf(statErr, "environment file '%s' stat error", envFile)
 		}
-	}
-	if c.RunCache == "" || c.RunCache == "/" {
-		return fmt.Errorf("run cache cannot be empty or /")
 	}
 	return nil
 }

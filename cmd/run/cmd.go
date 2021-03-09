@@ -2,6 +2,8 @@ package run
 
 import (
 	"context"
+	"encoding/json"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
+	"github.com/combust-labs/firebuild/pkg/vmm/pid"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
@@ -37,6 +40,7 @@ var (
 	jailingFcConfig  = configs.NewJailingFirecrackerConfig()
 	logConfig        = configs.NewLogginConfig()
 	machineConfig    = configs.NewMachineConfig()
+	runCache         = configs.NewRunCacheConfig()
 )
 
 func initFlags() {
@@ -46,6 +50,7 @@ func initFlags() {
 	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
+	Command.Flags().AddFlagSet(runCache.FlagSet())
 	// Storage provider flags:
 	cmd.AddStorageFlags(Command.Flags())
 }
@@ -70,6 +75,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	validatingConfigs := []configs.ValidatingConfig{
 		commandConfig,
 		jailingFcConfig,
+		runCache,
 	}
 
 	for _, validatingConfig := range validatingConfigs {
@@ -80,12 +86,12 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	// create cache directory:
-	if err := os.MkdirAll(commandConfig.RunCache, 0755); err != nil {
+	if err := os.MkdirAll(runCache.RunCache, 0755); err != nil {
 		rootLogger.Error("failed creating run cache directory", "reason", err)
 		os.Exit(1)
 	}
 
-	cacheDirectory := filepath.Join(commandConfig.RunCache, jailingFcConfig.VMMID())
+	cacheDirectory := filepath.Join(runCache.RunCache, jailingFcConfig.VMMID())
 	if err := os.Mkdir(cacheDirectory, 0755); err != nil {
 		rootLogger.Error("failed creating run VMM cache directory", "reason", err)
 		os.Exit(1)
@@ -133,6 +139,29 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
+	// get the veth interface name and write to also to a file:
+	vethIfaceName := naming.GetRandomVethName()
+
+	cniMetadata := &configs.RunningVMMCNIMetadata{
+		Config:        cniConfig,
+		VethIfaceName: vethIfaceName,
+		NetName:       machineConfig.MachineCNINetworkName,
+		NetNS:         jailingFcConfig.NetNS,
+	}
+
+	cniMetadataBytes, jsonErr := json.Marshal(cniMetadata)
+	if jsonErr != nil {
+		rootLogger.Error("failed serializing CNI metadata to JSON", "reason", jsonErr)
+		cleanup.CallAll() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+
+	if err := ioutil.WriteFile(filepath.Join(cacheDirectory, "cni"), []byte(cniMetadataBytes), 0644); err != nil {
+		rootLogger.Error("failed writing CNI metadata the cache file", "reason", err)
+		cleanup.CallAll() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+
 	// don't use resolvedRootfs below this point:
 	machineConfig.
 		WithDaemonize(commandConfig.Daemonize).
@@ -142,10 +171,9 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	vmmEnvironment, envErr := commandConfig.MergedEnvironment()
 	if envErr != nil {
 		rootLogger.Error("failed merging environment", "reason", envErr)
+		cleanup.CallAll() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
-
-	vethIfaceName := naming.GetRandomVethName()
 
 	vmmLogger := rootLogger.With("vmm-id", jailingFcConfig.VMMID(), "veth-name", vethIfaceName)
 
@@ -166,6 +194,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		sshPublicKey, readErr := utils.SSHPublicKeyFromFile(commandConfig.IdentityFile)
 		if readErr != nil {
 			rootLogger.Error("failed reading an SSH key configured with --identity-file", "reason", readErr)
+			cleanup.CallAll() // manually - defers don't run on os.Exit
 			os.Exit(1)
 		}
 		strategyPublicKeys = append(strategyPublicKeys, sshPublicKey)
@@ -199,11 +228,20 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	startedMachine, runErr := vmmProvider.Start(vmmCtx)
 	if runErr != nil {
-		vmmLogger.Error("firecracker VMM did not start, build failed", "reason", runErr)
+		vmmLogger.Error("firecracker VMM did not start, run failed", "reason", runErr)
 		return
 	}
 
 	ifaceStaticConfig := startedMachine.NetworkInterfaces()[0].StaticConfiguration
+
+	machinePid, pidErr := startedMachine.PID()
+	if pidErr == nil {
+		if err := pid.WritePIDToFile(cacheDirectory, machinePid); err != nil {
+			rootLogger.Warn("pid write error", "reason", err)
+		}
+	} else {
+		rootLogger.Warn("failed fetching machine PID", "reason", pidErr)
+	}
 
 	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IPAddr.IP.String())
 
@@ -211,11 +249,16 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		vmmLogger.Info("VMM running as a daemon",
 			"ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String(),
 			"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
-			"cache-dir", cacheDirectory)
+			"cache-dir", cacheDirectory,
+			"pid", machinePid)
 		os.Exit(0) // don't trigger defers
 	}
 
-	vmmLogger.Info("VMM running", "ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String())
+	vmmLogger.Info("VMM running",
+		"ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String(),
+		"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
+		"cache-dir", cacheDirectory,
+		"pid", machinePid)
 
 	chanStopStatus := installSignalHandlers(context.Background(), vmmLogger, startedMachine)
 
