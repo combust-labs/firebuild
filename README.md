@@ -1,6 +1,6 @@
 # Build Firecracker VMMs from Dockerfiles
 
-Work in progress.
+A set of tools to build, run and operate Firecracker VMMs directly from `Dockerfiles`.
 
 ## Create a dedicated CNI network for the builds
 
@@ -53,7 +53,7 @@ Because the `baseos` root file system is built completely with Docker, there is 
 
 TODO: explain why is the base operating system rootfs required.
 
-## Create a Postgres 13 VMM rootfs from Buster Dockerfile
+## Create a Postgres 13 VMM rootfs from Debian Buster Dockerfile
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go rootfs \
