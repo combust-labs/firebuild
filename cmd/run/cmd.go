@@ -130,6 +130,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	// don't use resolvedRootfs below this point:
 	machineConfig.
+		WithDaemonize(commandConfig.Daemonize).
 		WithKernelOverride(resolveKernel.HostPath()).
 		WithRootfsOverride(runRootfs)
 

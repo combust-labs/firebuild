@@ -47,8 +47,9 @@ func (m *defaultStartedMachine) Cleanup(c chan bool) {
 	defer m.Unlock()
 	if !m.wasStopped {
 		m.cleanupCNINetwork()
+		// only handle the channel if the VMM wasn't stopped manually
+		c <- StoppedGracefully
 	}
-	c <- StoppedGracefully
 }
 
 func (m *defaultStartedMachine) NetworkInterfaces() firecracker.NetworkInterfaces {

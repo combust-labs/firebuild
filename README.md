@@ -97,10 +97,11 @@ sudo /usr/local/go/bin/go run ./main.go run \
 
 ### Additional settings
 
-- `--identity-file`: full path to the publish SSH key to deploy to the running VMM
-- `--env`: environment variable to deploy to configure the VMM with, multiple OK, format `--env=VAR_NAME=value`
+- `--daemonize`: when specified, runs the VMM in a daemonized mode
 - `--env-file`: full path to the environment file, multiple OK
+- `--env`: environment variable to deploy to configure the VMM with, multiple OK, format `--env=VAR_NAME=value`
 - `--hostname`: hostname to apply to the VMM
+- `--identity-file`: full path to the publish SSH key to deploy to the running VMM
 
 ### Environment merging
 
