@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// JailerConfig represents Jailerspecific configuration options.
+// JailingFirecrackerConfig represents Jailerspecific configuration options.
 type JailingFirecrackerConfig struct {
 	sync.Mutex
 	flagBase

@@ -2,18 +2,16 @@ package kill
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/combust-labs/firebuild/configs"
-	"github.com/combust-labs/firebuild/pkg/cni"
 	"github.com/combust-labs/firebuild/pkg/utils"
+	"github.com/combust-labs/firebuild/pkg/vmm/cni"
 	"github.com/combust-labs/firebuild/pkg/vmm/pid"
+	"github.com/combust-labs/firebuild/pkg/vmm/sock"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/spf13/cobra"
@@ -26,14 +24,6 @@ var Command = &cobra.Command{
 	Run:   run,
 	Long:  ``,
 }
-
-/*
-sudo /usr/local/go/bin/go run ./main.go kill \
-	--binary-firecracker=$(readlink /usr/bin/firecracker) \
-    --binary-jailer=$(readlink /usr/bin/jailer) \
-    --chroot-base=/srv/jailer \
-	--vmm-id=ad120b6306cd4c3f995870e1a8434b87
-*/
 
 var (
 	cniConfig       = configs.NewCNIConfig()
@@ -118,8 +108,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	// Do I have the socket file?
-	socketPath := filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root/run/firecracker.socket")
-	hasSocket, existsErr := utils.PathExists(socketPath)
+	socketPath, hasSocket, existsErr := sock.FetchSocketPathIfExists(jailingFcConfig)
 	if existsErr != nil {
 		rootLogger.Error("failed checking if the VMM socket file exists", "reason", existsErr)
 		os.Exit(1)
@@ -148,7 +137,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			if hasPid {
 				rootLogger.Info("VMM with pid, waiting for process to exit")
 
-				waitCtx, cancelFunc := context.WithTimeout(context.Background(), time.Second*15)
+				waitCtx, cancelFunc := context.WithTimeout(context.Background(), commandConfig.ShutdownTimeout)
 				defer cancelFunc()
 				chanErr := make(chan error, 1)
 
@@ -173,29 +162,13 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	}
 
 	// have to clean up the CNI network:
-	cniMetadataFile := filepath.Join(runCache.RunCache, commandConfig.VMMID, "cni")
-	hasVethFile := true
-	if _, err := utils.CheckIfExistsAndIsRegular(cniMetadataFile); err != nil {
-		if !os.IsNotExist(err) {
-			rootLogger.Error("failed checking if the CNI metadata file exists", "reason", err)
-			os.Exit(1)
-		} else {
-			rootLogger.Warn("CNI metadata file not found, no automatic way to clean CNI", "reason", err)
-			hasVethFile = false
-		}
+	cniMetadata, hasCniMetadata, cniErr := cni.FetchCNIMetadataIfExists(filepath.Join(runCache.RunCache, commandConfig.VMMID))
+	if cniErr != nil {
+		rootLogger.Error("failed fetching CNI metadata file", "reason", cniErr)
+		os.Exit(1)
 	}
 
-	if hasVethFile {
-		cniMetadataBytes, err := ioutil.ReadFile(cniMetadataFile)
-		if err != nil {
-			rootLogger.Error("failed reading the CNI meatadata file", "reason", err)
-			os.Exit(1)
-		}
-		cniMetadata := &configs.RunningVMMCNIMetadata{}
-		if err := json.Unmarshal(cniMetadataBytes, cniMetadata); err != nil {
-			rootLogger.Error("failed unmarshaling the CNI metadata file", "reason", err)
-			os.Exit(1)
-		}
+	if hasCniMetadata {
 		rootLogger.Info("cleaning up CNI")
 		if err := cni.CleanupCNI(rootLogger,
 			cniMetadata.Config,

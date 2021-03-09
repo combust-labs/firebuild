@@ -3,6 +3,7 @@ package configs
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/pkg/errors"
@@ -32,24 +33,30 @@ func (c *BaseOSCommandConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
+// KillCommandConfig is the kill command configuration.
 type KillCommandConfig struct {
 	flagBase
 	ValidatingConfig
 
-	VMMID string
+	ShutdownTimeout time.Duration
+	VMMID           string
 }
 
+// NewKillCommandConfig returns new command configuration.
 func NewKillCommandConfig() *KillCommandConfig {
 	return &KillCommandConfig{}
 }
 
+// FlagSet returns an instance of the flag set for the configuration.
 func (c *KillCommandConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
+		c.flagSet.DurationVar(&c.ShutdownTimeout, "shutdown-timeout", time.Second*15, "If the VMM is running and shutdown is called, how long to wait for clean shutdown")
 		c.flagSet.StringVar(&c.VMMID, "vmm-id", "", "ID of the VMM to kill")
 	}
 	return c.flagSet
 }
 
+// Validate validates the correctness of the configuration.
 func (c *KillCommandConfig) Validate() error {
 	if c.VMMID == "" {
 		return fmt.Errorf("--vmm-id can't be empty")
@@ -95,7 +102,7 @@ type RunCacheConfig struct {
 	RunCache string
 }
 
-// NewRunCommandConfig returns new command configuration.
+// NewRunCacheConfig returns new run cahce command configuration.
 func NewRunCacheConfig() *RunCacheConfig {
 	return &RunCacheConfig{}
 }

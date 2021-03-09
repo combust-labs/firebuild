@@ -2,8 +2,6 @@ package run
 
 import (
 	"context"
-	"encoding/json"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,6 +16,7 @@ import (
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
+	"github.com/combust-labs/firebuild/pkg/vmm/cni"
 	"github.com/combust-labs/firebuild/pkg/vmm/pid"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
@@ -142,22 +141,13 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	// get the veth interface name and write to also to a file:
 	vethIfaceName := naming.GetRandomVethName()
 
-	cniMetadata := &configs.RunningVMMCNIMetadata{
+	if err := cni.WriteCNIMetadataToFile(cacheDirectory, &cni.RunningVMMCNIMetadata{
 		Config:        cniConfig,
 		VethIfaceName: vethIfaceName,
 		NetName:       machineConfig.MachineCNINetworkName,
 		NetNS:         jailingFcConfig.NetNS,
-	}
-
-	cniMetadataBytes, jsonErr := json.Marshal(cniMetadata)
-	if jsonErr != nil {
-		rootLogger.Error("failed serializing CNI metadata to JSON", "reason", jsonErr)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
-	}
-
-	if err := ioutil.WriteFile(filepath.Join(cacheDirectory, "cni"), []byte(cniMetadataBytes), 0644); err != nil {
-		rootLogger.Error("failed writing CNI metadata the cache file", "reason", err)
+	}); err != nil {
+		rootLogger.Error("failed writing CNI metadata to file", "reason", err)
 		cleanup.CallAll() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}

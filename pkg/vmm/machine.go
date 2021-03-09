@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/combust-labs/firebuild/configs"
-	"github.com/combust-labs/firebuild/pkg/cni"
 	"github.com/combust-labs/firebuild/pkg/remote"
+	"github.com/combust-labs/firebuild/pkg/vmm/cni"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
 )

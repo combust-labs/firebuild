@@ -27,10 +27,3 @@ func (c *CNIConfig) FlagSet() *pflag.FlagSet {
 	}
 	return c.flagSet
 }
-
-type RunningVMMCNIMetadata struct {
-	Config        *CNIConfig `json:"config"`
-	VethIfaceName string     `json:"veth-iface-name"`
-	NetName       string     `json:"net-name"`
-	NetNS         string     `json:"net-ns"`
-}
