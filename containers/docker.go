@@ -43,7 +43,7 @@ var (
 	// - for every directory in base OS file system root (`find / -maxdepth 1 -type d`)
 	//   - if directory exists in the list, just create the directory
 	//   - if directory does not exist in the list and is not /, copy complete by preserving inode attributes
-	ImageBaseOSExportNoCopyDirs = []string{"/boot", "/opt", "/proc", "/run", "/srv", "/sys", "/tmp", "/var"}
+	ImageBaseOSExportNoCopyDirs = []string{"/boot", "/opt", "/proc", "/run", "/srv", "/sys", "/tmp"}
 )
 
 // GetDefaultClient returns a default instance of the Docker client.
