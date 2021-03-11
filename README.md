@@ -149,6 +149,12 @@ sudo /usr/local/go/bin/go run ./main.go kill \
 
 TODO: purge command to be implemented
 
+### List VMMs
+
+```sh
+sudo /usr/local/go/bin/go run ./main.go ls
+```
+
 ## Dockerfile git+http(s):// URL
 
 It's possible to reference a `Dockerfile` residing in the git repository available under a HTTP(s) URL. Here's an example:

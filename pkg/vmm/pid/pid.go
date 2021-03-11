@@ -19,6 +19,35 @@ type RunningVMMPID struct {
 	Pid int `json:"pid"`
 }
 
+// IsRunning checks if the process identified by the PID is still running.
+func (p *RunningVMMPID) IsRunning() (bool, error) {
+	if p.Pid <= 0 {
+		return false, fmt.Errorf("invalid pid %v", p.Pid)
+	}
+	proc, err := os.FindProcess(p.Pid)
+	if err != nil {
+		return false, err
+	}
+	err = proc.Signal(syscall.Signal(0))
+	if err == nil {
+		return true, nil
+	}
+	if err.Error() == "os: process already finished" {
+		return false, nil
+	}
+	errno, ok := err.(syscall.Errno)
+	if !ok {
+		return false, err
+	}
+	switch errno {
+	case syscall.ESRCH:
+		return false, nil
+	case syscall.EPERM:
+		return true, nil
+	}
+	return false, err
+}
+
 // Wait waits for the process represented by this PID to exit.
 func (p *RunningVMMPID) Wait(ctx context.Context) error {
 	chanErr := make(chan error, 1)
@@ -29,29 +58,13 @@ func (p *RunningVMMPID) Wait(ctx context.Context) error {
 				close(chanErr)
 				return
 			}
-			proc, err := os.FindProcess(p.Pid)
+			isRunning, err := p.IsRunning()
 			if err != nil {
-				chanErr <- errors.Wrap(err, "find process")
-				break
-			}
-			err = proc.Signal(syscall.Signal(0))
-			if err == nil {
-				time.Sleep(time.Second)
-				continue
-			}
-			if err.Error() == "os: process already finished" {
-				chanErr <- nil
-				break
-			}
-			errno, ok := err.(syscall.Errno)
-			if !ok {
 				chanErr <- err
 				break
 			}
-			switch errno {
-			case syscall.ESRCH:
-				chanErr <- nil
-				break
+			if isRunning {
+				continue
 			}
 			time.Sleep(time.Second)
 		}
