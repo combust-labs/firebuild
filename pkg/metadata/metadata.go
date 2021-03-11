@@ -10,9 +10,9 @@ import (
 type MetadataType = string
 
 const (
-	MetadataTypeBaseOS   = MetadataType("baseos")
-	MetadataTypeRootfsOS = MetadataType("rootfs")
-	MetadataTypeRun      = MetadataType("run")
+	MetadataTypeBaseOS = MetadataType("baseos")
+	MetadataTypeRootfs = MetadataType("rootfs")
+	MetadataTypeRun    = MetadataType("run")
 )
 
 // MDBaseOS is the base OS metadata.
@@ -56,12 +56,22 @@ type MDNetworkInterafce struct {
 	StaticConfiguration *MDNetStaticConfiguration `json:"static-configuration"`
 }
 
+// MDRootfsConfig represents the rootfs build configuration.
+type MDRootfsConfig struct {
+	BuildArgs         map[string]string `json:"build-args"`
+	Dockerfile        string            `json:"dockerfile"`
+	PreBuildCommands  []string          `json:"pre-build-commands"`
+	PostBuildCommands []string          `json:"post-build-commands"`
+}
+
 // MDRootfs represents a metadata of the rootfs.
 type MDRootfs struct {
-	BuildArgs    map[string]string `json:"build-args"`
+	BuildConfig  MDRootfsConfig    `json:"build-config"`
 	CreatedAtUTC int64             `json:"created-at-utc"`
 	Image        MDImage           `json:"image"`
+	Labels       map[string]string `json:"labels"`
 	Parent       interface{}       `json:"parent"`
+	Ports        []string          `json:"ports"`
 	Tag          string            `json:"tag"`
 	Type         MetadataType      `json:"type"`
 }

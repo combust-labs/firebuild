@@ -14,6 +14,7 @@ import (
 	"github.com/combust-labs/firebuild/build/stage"
 	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/combust-labs/firebuild/pkg/storage"
@@ -195,7 +196,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	// -- Command specific // END
 
 	// resolve kernel:
-	resolveKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
+	resolvedKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
 		ID: machineConfig.MachineVMLinuxID,
 	})
 	if kernelResolveErr != nil {
@@ -229,7 +230,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	// don't use resolvedRootfs below this point:
 	machineConfig.
-		WithKernelOverride(resolveKernel.HostPath()).
+		WithKernelOverride(resolvedKernel.HostPath()).
 		WithRootfsOverride(buildRootfs)
 
 	vethIfaceName := naming.GetRandomVethName()
@@ -347,14 +348,24 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	createdRootfsFile := filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root", fsFileName)
 	storeResult, storeErr := storageImpl.StoreRootfsFile(&storage.RootfsStore{
 		LocalPath: createdRootfsFile,
-		Metadata: map[string]interface{}{
-			"labels":         buildContext.Metadata(),
-			"ports":          buildContext.ExposedPorts(),
-			"created-at-utc": time.Now().UTC().Unix(),
-			"build-context": map[string]interface{}{
-				"cni-config": cniConfig,
-				"config":     &commandConfig,
+		Metadata: metadata.MDRootfs{
+			BuildConfig: metadata.MDRootfsConfig{
+				BuildArgs:         commandConfig.BuildArgs,
+				Dockerfile:        commandConfig.Dockerfile,
+				PreBuildCommands:  commandConfig.PreBuildCommands,
+				PostBuildCommands: commandConfig.PostBuildCommands,
 			},
+			CreatedAtUTC: time.Now().UTC().Unix(),
+			Image: metadata.MDImage{
+				Org:     org,
+				Image:   name,
+				Version: version,
+			},
+			Labels: buildContext.Metadata(),
+			Parent: resolvedRootfs.Metadata(),
+			Ports:  buildContext.ExposedPorts(),
+			Tag:    commandConfig.Tag,
+			Type:   metadata.MetadataTypeRootfs,
 		},
 		Org:     org,
 		Image:   name,
