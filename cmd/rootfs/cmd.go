@@ -206,7 +206,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	// resolve rootfs:
 	resolvedRootfs, rootfsResolveErr := storageImpl.FetchRootfs(&storage.RootfsLookup{
 		Org:     structuredFrom.Org(),
-		Image:   structuredFrom.OS(),
+		Image:   structuredFrom.Image(),
 		Version: structuredFrom.Version(),
 	})
 	if rootfsResolveErr != nil {

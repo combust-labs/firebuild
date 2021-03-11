@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/build/reader"
@@ -14,6 +15,7 @@ import (
 	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/containers"
+	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/storage"
 	"github.com/combust-labs/firebuild/pkg/utils"
@@ -204,10 +206,19 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	storeResult, storeErr := storageImpl.StoreRootfsFile(&storage.RootfsStore{
 		LocalPath: rootFSFile,
-		Metadata:  map[string]interface{}{},
-		Org:       structuredBase.Org(),
-		Image:     structuredBase.OS(),
-		Version:   structuredBase.Version(),
+		Metadata: metadata.MDBaseOS{
+			CreatedAtUTC: time.Now().UTC().Unix(),
+			Image: metadata.MDImage{
+				Org:     structuredBase.Org(),
+				Image:   structuredBase.Image(),
+				Version: structuredBase.Version(),
+			},
+			Labels: map[string]string{},
+			Type:   metadata.MetadataTypeBaseOS,
+		},
+		Org:     structuredBase.Org(),
+		Image:   structuredBase.Image(),
+		Version: structuredBase.Version(),
 	})
 	if storeErr != nil {
 		rootLogger.Error("failed storing built rootfs", "reason", storeErr)

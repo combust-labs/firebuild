@@ -128,7 +128,7 @@ func (cmd Expose) GetOriginal() string {
 // StructuredFrom decomposes the base in=mage of From into the org, os and version parts.
 type StructuredFrom struct {
 	org     string
-	os      string
+	image   string
 	version string
 }
 
@@ -137,9 +137,9 @@ func (sf *StructuredFrom) Org() string {
 	return sf.org
 }
 
-// OS returns the OS component of the base image.
-func (sf *StructuredFrom) OS() string {
-	return sf.os
+// Image returns the image component of the base image.
+func (sf *StructuredFrom) Image() string {
+	return sf.image
 }
 
 // Version returns the base image version.
@@ -167,7 +167,7 @@ func (cmd From) ToStructuredFrom() *StructuredFrom {
 		imageName = strings.TrimPrefix(imageName, structuredForm.org+"/")
 	}
 	osAndVersion := strings.Split(imageName, ":")
-	structuredForm.os = osAndVersion[0]
+	structuredForm.image = osAndVersion[0]
 	structuredForm.version = osAndVersion[1]
 	return structuredForm
 }

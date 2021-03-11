@@ -7,11 +7,20 @@ import (
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 )
 
+type MetadataType = string
+
+const (
+	MetadataTypeBaseOS   = MetadataType("baseos")
+	MetadataTypeRootfsOS = MetadataType("rootfs")
+	MetadataTypeRun      = MetadataType("run")
+)
+
 // MDBaseOS is the base OS metadata.
 type MDBaseOS struct {
 	CreatedAtUTC int64             `json:"created-at-utc"`
 	Image        MDImage           `json:"image"`
 	Labels       map[string]string `json:"labels"`
+	Type         MetadataType      `json:"type"`
 }
 
 // MDImage is the image.
@@ -47,19 +56,14 @@ type MDNetworkInterafce struct {
 	StaticConfiguration *MDNetStaticConfiguration `json:"static-configuration"`
 }
 
-// MDParent represents a parent rootfs metadata.
-type MDParent struct {
-	Rootfs *MDRootfs `json:"rootfs"`
-}
-
 // MDRootfs represents a metadata of the rootfs.
 type MDRootfs struct {
-	BaseOS       *MDBaseOS         `json:"baseos"`
 	BuildArgs    map[string]string `json:"build-args"`
 	CreatedAtUTC int64             `json:"created-at-utc"`
 	Image        MDImage           `json:"image"`
-	Parent       *MDParent         `json:"parent"`
+	Parent       interface{}       `json:"parent"`
 	Tag          string            `json:"tag"`
+	Type         MetadataType      `json:"type"`
 }
 
 // MDRunConfigs contains the configuration of the running VMM.
@@ -79,4 +83,5 @@ type MDRun struct {
 	PID               pid.RunningVMMPID         `json:"pid"`
 	StartedAtUTC      int64                     `json:"started-at-utc"`
 	VMMID             string                    `json:"vmm-id"`
+	Type              MetadataType              `json:"type"`
 }
