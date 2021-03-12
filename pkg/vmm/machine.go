@@ -19,8 +19,8 @@ import (
 type StartedMachine interface {
 	// Cleanup handles cleanup when the machine is stopped from outside of the controlling process.
 	Cleanup(chan bool)
-	// Metadata returns the metadata of a running VMM.
-	Metadata() (*metadata.MDRun, error)
+	// Decorates metadata with additional properties.
+	DecorateMetadata(*metadata.MDRun) error
 	// Stop stops the VMM, remote connected client may be nil.
 	Stop(context.Context, remote.ConnectedClient) StoppedOK
 	// StopAndWait stops the VMM and waits for the VMM to stop, remote connected client may be nil.
@@ -38,7 +38,6 @@ type defaultStartedMachine struct {
 
 	logger        hclog.Logger
 	machine       *firecracker.Machine
-	startTime     time.Time
 	vethIfaceName string
 
 	wasStopped bool
@@ -54,28 +53,13 @@ func (m *defaultStartedMachine) Cleanup(c chan bool) {
 	}
 }
 
-func (m *defaultStartedMachine) Metadata() (*metadata.MDRun, error) {
+func (m *defaultStartedMachine) DecorateMetadata(md *metadata.MDRun) error {
 	machinePid, err := m.machine.PID()
 	if err != nil {
-		return nil, errors.Wrap(err, "machine pid read")
+		return errors.Wrap(err, "machine pid read")
 	}
-	return &metadata.MDRun{
-		CNI: metadata.MDRunCNI{
-			VethIfaceName: m.vethIfaceName,
-			NetName:       m.machineConfig.MachineCNINetworkName,
-			NetNS:         m.jailingFcConfig.NetNS,
-		},
-		Configs: metadata.MDRunConfigs{
-			CNI:     m.cniConfig,
-			Jailer:  m.jailingFcConfig,
-			Machine: m.machineConfig,
-		},
-		Drives:            m.machine.Cfg.Drives,
-		NetworkInterfaces: metadata.FcNetworkInterfacesToMetadata(m.machine.Cfg.NetworkInterfaces),
-		PID:               pid.RunningVMMPID{Pid: machinePid},
-		StartedAtUTC:      m.startTime.UTC().Unix(),
-		VMMID:             m.machine.Cfg.VMID,
-	}, nil
+	md.PID = pid.RunningVMMPID{Pid: machinePid}
+	return nil
 }
 
 func (m *defaultStartedMachine) Stop(ctx context.Context, remoteClient remote.ConnectedClient) StoppedOK {

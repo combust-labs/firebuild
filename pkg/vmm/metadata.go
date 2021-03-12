@@ -36,14 +36,12 @@ func FetchMetadataIfExists(cacheDirectory string) (*metadata.MDRun, bool, error)
 }
 
 // WriteMetadataToFile writes a run metadata to file under the cache directory.
-func WriteMetadataToFile(cacheDirectory string, md *metadata.MDRun, mdrootfs *metadata.MDRootfs) error {
-	md.RunCache = cacheDirectory
-	md.Rootfs = mdrootfs
+func WriteMetadataToFile(md *metadata.MDRun) error {
 	mdBytes, jsonErr := json.Marshal(md)
 	if jsonErr != nil {
 		return errors.Wrap(jsonErr, "failed serializing machine metadata to JSON")
 	}
-	if err := ioutil.WriteFile(filepath.Join(cacheDirectory, "metadata.json"), []byte(mdBytes), 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(md.RunCache, "metadata.json"), []byte(mdBytes), 0644); err != nil {
 		return errors.Wrap(err, "failed writing PID metadata the cache file")
 	}
 	return nil

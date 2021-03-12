@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/combust-labs/firebuild/cmd/baseos"
+	"github.com/combust-labs/firebuild/cmd/inspect"
 	"github.com/combust-labs/firebuild/cmd/kill"
 	"github.com/combust-labs/firebuild/cmd/ls"
 	"github.com/combust-labs/firebuild/cmd/purge"
@@ -25,6 +26,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(baseos.Command)
+	rootCmd.AddCommand(inspect.Command)
 	rootCmd.AddCommand(kill.Command)
 	rootCmd.AddCommand(ls.Command)
 	rootCmd.AddCommand(purge.Command)
