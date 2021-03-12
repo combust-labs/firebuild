@@ -6,20 +6,21 @@ import (
 	"time"
 
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/combust-labs/firebuild/pkg/vmm/cni"
+	"github.com/combust-labs/firebuild/pkg/vmm/pid"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
+	"github.com/pkg/errors"
 )
 
 // StartedMachine abstracts a started Firecracker VMM.
 type StartedMachine interface {
 	// Cleanup handles cleanup when the machine is stopped from outside of the controlling process.
 	Cleanup(chan bool)
-	// NetworkInterfaces returns network interfaces of a running VMM.
-	NetworkInterfaces() firecracker.NetworkInterfaces
-	// PID returns the PID of the running VMM.
-	PID() (int, error)
+	// Metadata returns the metadata of a running VMM.
+	Metadata() (*metadata.MDRun, error)
 	// Stop stops the VMM, remote connected client may be nil.
 	Stop(context.Context, remote.ConnectedClient) StoppedOK
 	// StopAndWait stops the VMM and waits for the VMM to stop, remote connected client may be nil.
@@ -31,11 +32,13 @@ type StartedMachine interface {
 type defaultStartedMachine struct {
 	sync.Mutex
 
-	cniConfig     *configs.CNIConfig
-	machineConfig *configs.MachineConfig
+	cniConfig       *configs.CNIConfig
+	jailingFcConfig *configs.JailingFirecrackerConfig
+	machineConfig   *configs.MachineConfig
 
 	logger        hclog.Logger
 	machine       *firecracker.Machine
+	startTime     time.Time
 	vethIfaceName string
 
 	wasStopped bool
@@ -51,12 +54,28 @@ func (m *defaultStartedMachine) Cleanup(c chan bool) {
 	}
 }
 
-func (m *defaultStartedMachine) NetworkInterfaces() firecracker.NetworkInterfaces {
-	return m.machine.Cfg.NetworkInterfaces
-}
-
-func (m *defaultStartedMachine) PID() (int, error) {
-	return m.machine.PID()
+func (m *defaultStartedMachine) Metadata() (*metadata.MDRun, error) {
+	machinePid, err := m.machine.PID()
+	if err != nil {
+		return nil, errors.Wrap(err, "machine pid read")
+	}
+	return &metadata.MDRun{
+		CNI: metadata.MDRunCNI{
+			VethIfaceName: m.vethIfaceName,
+			NetName:       m.machineConfig.MachineCNINetworkName,
+			NetNS:         m.jailingFcConfig.NetNS,
+		},
+		Configs: metadata.MDRunConfigs{
+			CNI:     m.cniConfig,
+			Jailer:  m.jailingFcConfig,
+			Machine: m.machineConfig,
+		},
+		Drives:            m.machine.Cfg.Drives,
+		NetworkInterfaces: metadata.FcNetworkInterfacesToMetadata(m.machine.Cfg.NetworkInterfaces),
+		PID:               pid.RunningVMMPID{Pid: machinePid},
+		StartedAtUTC:      m.startTime.UTC().Unix(),
+		VMMID:             m.machine.Cfg.VMID,
+	}, nil
 }
 
 func (m *defaultStartedMachine) Stop(ctx context.Context, remoteClient remote.ConnectedClient) StoppedOK {

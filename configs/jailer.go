@@ -14,7 +14,7 @@ import (
 type JailingFirecrackerConfig struct {
 	sync.Mutex
 	flagBase
-	ValidatingConfig
+	ValidatingConfig `json:"-"`
 
 	BinaryFirecracker string `json:"binary-firecracker"`
 	BinaryJailer      string `json:"binary-jailer"`

@@ -3,6 +3,7 @@ package rootfs
 import (
 	"context"
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -228,7 +229,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	// don't use resolvedRootfs below this point:
+	// don't use resolvedRootfs.HostPath() below this point:
 	machineConfig.
 		WithKernelOverride(resolvedKernel.HostPath()).
 		WithRootfsOverride(buildRootfs)
@@ -279,16 +280,23 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		return
 	}
 
-	ifaceStaticConfig := startedMachine.NetworkInterfaces()[0].StaticConfiguration
+	machineMetadata, metadataErr := startedMachine.Metadata()
+	if metadataErr != nil {
+		startedMachine.Stop(vmmCtx, nil)
+		vmmLogger.Error("Failed fetching machine metadata", "reason", metadataErr)
+		return
+	}
 
-	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IPAddr.IP.String())
+	ifaceStaticConfig := machineMetadata.NetworkInterfaces[0].StaticConfiguration
 
-	vmmLogger.Info("VMM running", "ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String())
+	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IP)
+
+	vmmLogger.Info("VMM running", "ip-net", ifaceStaticConfig.IPConfiguration.IPAddr)
 
 	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
 		SSHPrivateKey:      *rsaPrivateKey,
 		SSHUsername:        machineConfig.MachineSSHUser,
-		IP:                 ifaceStaticConfig.IPConfiguration.IPAddr.IP,
+		IP:                 net.IP(ifaceStaticConfig.IPConfiguration.IP),
 		Port:               machineConfig.MachineSSHPort,
 		EnableAgentForward: machineConfig.MachineSSHEnableAgentForward,
 	}, vmmLogger.Named("remote-client"))

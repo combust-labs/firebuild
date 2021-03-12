@@ -138,11 +138,7 @@ To get the VMM ID, look closely at the output of the `run ... --detached` comman
 Copy the VMM ID from the output and run:
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go kill \
-    --binary-firecracker=$(readlink /usr/bin/firecracker) \
-    --binary-jailer=$(readlink /usr/bin/jailer) \
-    --chroot-base=/srv/jailer \
-    --vmm-id=${VMMID}
+sudo /usr/local/go/bin/go run ./main.go kill --vmm-id=${VMMID}
 ```
 
 ### Purging remains of the VMMs stopped without the kill command
@@ -153,6 +149,12 @@ TODO: purge command to be implemented
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go ls
+```
+
+Example output:
+
+```
+2021-03-12T01:46:21.752Z [INFO]  ls: vmm: id=df45b6e14538456286e4a4bc1f9bf6e2 running=true pid=20658 image=tests/postgres:13 started="2021-03-12 01:46:11 +0000 UTC" ip-address=192.168.127.9
 ```
 
 ## Dockerfile git+http(s):// URL
