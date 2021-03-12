@@ -14,17 +14,17 @@ import (
 type JailingFirecrackerConfig struct {
 	sync.Mutex
 	flagBase
-	ValidatingConfig
+	ValidatingConfig `json:"-"`
 
-	BinaryFirecracker string
-	BinaryJailer      string
-	ChrootBase        string
+	BinaryFirecracker string `json:"binary-firecracker"`
+	BinaryJailer      string `json:"binary-jailer"`
+	ChrootBase        string `json:"chroot-base"`
 
-	JailerGID      int
-	JailerNumeNode int
-	JailerUID      int
+	JailerGID      int `json:"jailer-gid"`
+	JailerNumeNode int `json:"jailer-numa-node"`
+	JailerUID      int `json:"jailer-uid"`
 
-	NetNS string
+	NetNS string `json:"netns"`
 
 	vmmID string
 }

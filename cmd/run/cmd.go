@@ -10,14 +10,13 @@ import (
 	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/storage"
 	"github.com/combust-labs/firebuild/pkg/strategy"
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
-	"github.com/combust-labs/firebuild/pkg/vmm/cni"
-	"github.com/combust-labs/firebuild/pkg/vmm/pid"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
@@ -104,11 +103,12 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	})
 
 	// resolve kernel:
-	resolveKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
+	resolvedKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
 		ID: machineConfig.MachineVMLinuxID,
 	})
 	if kernelResolveErr != nil {
 		rootLogger.Error("failed resolving kernel", "reason", kernelResolveErr)
+		cleanup.CallAll() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
 
@@ -117,11 +117,20 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	structuredFrom := from.ToStructuredFrom()
 	resolvedRootfs, rootfsResolveErr := storageImpl.FetchRootfs(&storage.RootfsLookup{
 		Org:     structuredFrom.Org(),
-		Image:   structuredFrom.OS(),
+		Image:   structuredFrom.Image(),
 		Version: structuredFrom.Version(),
 	})
 	if rootfsResolveErr != nil {
 		rootLogger.Error("failed resolving rootfs", "reason", rootfsResolveErr)
+		cleanup.CallAll() // manually - defers don't run on os.Exit
+		os.Exit(1)
+	}
+
+	// the metadata here must be MDRootfs:
+	mdRootfs, unwrapErr := metadata.MDRootfsFromInterface(resolvedRootfs.Metadata().(map[string]interface{}))
+	if unwrapErr != nil {
+		rootLogger.Error("failed unwrapping metadata", "reason", unwrapErr)
+		cleanup.CallAll() // manually - defers don't run on os.Exit
 		os.Exit(1)
 	}
 
@@ -141,21 +150,10 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	// get the veth interface name and write to also to a file:
 	vethIfaceName := naming.GetRandomVethName()
 
-	if err := cni.WriteCNIMetadataToFile(cacheDirectory, &cni.RunningVMMCNIMetadata{
-		Config:        cniConfig,
-		VethIfaceName: vethIfaceName,
-		NetName:       machineConfig.MachineCNINetworkName,
-		NetNS:         jailingFcConfig.NetNS,
-	}); err != nil {
-		rootLogger.Error("failed writing CNI metadata to file", "reason", err)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
-	}
-
-	// don't use resolvedRootfs below this point:
+	// don't use resolvedRootfs.HostPath() below this point:
 	machineConfig.
 		WithDaemonize(commandConfig.Daemonize).
-		WithKernelOverride(resolveKernel.HostPath()).
+		WithKernelOverride(resolvedKernel.HostPath()).
 		WithRootfsOverride(runRootfs)
 
 	vmmEnvironment, envErr := commandConfig.MergedEnvironment()
@@ -222,33 +220,35 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		return
 	}
 
-	ifaceStaticConfig := startedMachine.NetworkInterfaces()[0].StaticConfiguration
-
-	machinePid, pidErr := startedMachine.PID()
-	if pidErr == nil {
-		if err := pid.WritePIDToFile(cacheDirectory, machinePid); err != nil {
-			rootLogger.Warn("pid write error", "reason", err)
-		}
-	} else {
-		rootLogger.Warn("failed fetching machine PID", "reason", pidErr)
+	machineMetadata, metadataErr := startedMachine.Metadata()
+	if metadataErr != nil {
+		startedMachine.Stop(vmmCtx, nil)
+		vmmLogger.Error("Failed fetching machine metadata", "reason", metadataErr)
+		return
 	}
 
-	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IPAddr.IP.String())
+	ifaceStaticConfig := machineMetadata.NetworkInterfaces[0].StaticConfiguration
+
+	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IP)
+
+	if err := vmm.WriteMetadataToFile(cacheDirectory, machineMetadata, mdRootfs); err != nil {
+		vmmLogger.Error("failed writing machine metadata to file", "reason", err, "metadata", machineMetadata)
+	}
 
 	if commandConfig.Daemonize {
 		vmmLogger.Info("VMM running as a daemon",
-			"ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String(),
+			"ip-net", ifaceStaticConfig.IPConfiguration.IPAddr,
 			"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
 			"cache-dir", cacheDirectory,
-			"pid", machinePid)
+			"pid", machineMetadata.PID.Pid)
 		os.Exit(0) // don't trigger defers
 	}
 
 	vmmLogger.Info("VMM running",
-		"ip-net", ifaceStaticConfig.IPConfiguration.IPAddr.String(),
+		"ip-net", ifaceStaticConfig.IPConfiguration.IPAddr,
 		"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
 		"cache-dir", cacheDirectory,
-		"pid", machinePid)
+		"pid", machineMetadata.PID.Pid)
 
 	chanStopStatus := installSignalHandlers(context.Background(), vmmLogger, startedMachine)
 

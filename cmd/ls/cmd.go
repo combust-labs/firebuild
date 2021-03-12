@@ -1,12 +1,14 @@
 package ls
 
 import (
+	"fmt"
 	"io/ioutil"
 	"path/filepath"
+	"time"
 
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/utils"
-	"github.com/combust-labs/firebuild/pkg/vmm/pid"
+	"github.com/combust-labs/firebuild/pkg/vmm"
 	"github.com/spf13/cobra"
 )
 
@@ -43,18 +45,23 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	for _, fileInfo := range fileInfos {
 		// see if the pid file can be loaded:
 		vmmID := fileInfo.Name()
-		vmmPid, hasPid, err := pid.FetchPIDIfExists(filepath.Join(runCache.RunCache, vmmID))
+		vmmMetadata, hasMetadata, err := vmm.FetchMetadataIfExists(filepath.Join(runCache.RunCache, vmmID))
 		if err != nil {
-			rootLogger.Error("failed loading pid file for possible VMM", "vmm-id", vmmID, "reason", err)
+			rootLogger.Error("failed loading metadata file for possible VMM", "vmm-id", vmmID, "reason", err)
 			continue
 		}
-		if hasPid {
-			running, err := vmmPid.IsRunning()
+		if hasMetadata {
+			running, err := vmmMetadata.PID.IsRunning()
 			if err != nil {
 				rootLogger.Error("failed checking pid status for possible VMM", "vmm-id", vmmID, "reason", err)
 				continue
 			}
-			rootLogger.Info("vmm", "id", vmmID, "running", running, "pid", vmmPid.Pid)
+			rootLogger.Info("vmm", "id", vmmID,
+				"running", running,
+				"pid", vmmMetadata.PID.Pid,
+				"image", fmt.Sprintf("%s/%s:%s", vmmMetadata.Rootfs.Image.Org, vmmMetadata.Rootfs.Image.Image, vmmMetadata.Rootfs.Image.Version),
+				"started", time.Unix(vmmMetadata.StartedAtUTC, 0).UTC().String(),
+				"ip-address", vmmMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
 		} else {
 			rootLogger.Info("vmm", "id", vmmID, "running", "???", "pid", "???")
 		}

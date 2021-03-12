@@ -16,7 +16,7 @@ type KernelLookup struct {
 // KernelResult contains the information about the resolved kernel.
 type KernelResult interface {
 	HostPath() string
-	Metadata() map[string]interface{}
+	Metadata() interface{}
 }
 
 // RootfsLookup is the rootfs query parameters configuration.
@@ -28,7 +28,7 @@ type RootfsLookup struct {
 
 type RootfsStore struct {
 	LocalPath string
-	Metadata  map[string]interface{}
+	Metadata  interface{}
 
 	Org     string
 	Image   string
@@ -38,7 +38,7 @@ type RootfsStore struct {
 // RootfsResult contains the information about the resolved rootfs.
 type RootfsResult interface {
 	HostPath() string
-	Metadata() map[string]interface{}
+	Metadata() interface{}
 }
 
 // RootfsStoreResult contains the information about the stored rootfs.

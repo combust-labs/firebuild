@@ -9,8 +9,8 @@ import (
 
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/utils"
+	"github.com/combust-labs/firebuild/pkg/vmm"
 	"github.com/combust-labs/firebuild/pkg/vmm/cni"
-	"github.com/combust-labs/firebuild/pkg/vmm/pid"
 	"github.com/combust-labs/firebuild/pkg/vmm/sock"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
@@ -26,17 +26,13 @@ var Command = &cobra.Command{
 }
 
 var (
-	cniConfig       = configs.NewCNIConfig()
-	commandConfig   = configs.NewKillCommandConfig()
-	jailingFcConfig = configs.NewJailingFirecrackerConfig()
-	logConfig       = configs.NewLogginConfig()
-	runCache        = configs.NewRunCacheConfig()
+	commandConfig = configs.NewKillCommandConfig()
+	logConfig     = configs.NewLogginConfig()
+	runCache      = configs.NewRunCacheConfig()
 )
 
 func initFlags() {
-	Command.Flags().AddFlagSet(cniConfig.FlagSet())
 	Command.Flags().AddFlagSet(commandConfig.FlagSet())
-	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(runCache.FlagSet())
 }
@@ -53,8 +49,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	rootLogger := logConfig.NewLogger("kill")
 
 	validatingConfigs := []configs.ValidatingConfig{
-		commandConfig,
-		jailingFcConfig,
 		runCache,
 	}
 
@@ -65,12 +59,25 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	}
 
-	jailingFcConfig.WithVMMID(commandConfig.VMMID)
+	vmmMetadata, hasMetadata, metadataErr := vmm.FetchMetadataIfExists(filepath.Join(runCache.RunCache, commandConfig.VMMID))
+	if metadataErr != nil {
+		rootLogger.Error("failed loading metadata", "reason", metadataErr, "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
+		os.Exit(1)
+	}
+
+	if !hasMetadata {
+		rootLogger.Error("run cache directory did not contain the VMM metadata", "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
+		os.Exit(1)
+	}
+
+	fullJailerPath := filepath.Join(vmmMetadata.Configs.Jailer.ChrootBase,
+		filepath.Base(vmmMetadata.Configs.Jailer.BinaryFirecracker),
+		vmmMetadata.VMMID)
 
 	// Check if the VMM ID together with chroot is an actual jailer directory
 
 	// 1. Check if there is anything to do:
-	if _, err := utils.CheckIfExistsAndIsDirectory(jailingFcConfig.JailerChrootDirectory()); err != nil {
+	if _, err := utils.CheckIfExistsAndIsDirectory(fullJailerPath); err != nil {
 		if os.IsNotExist(err) {
 			// nothing to do
 			rootLogger.Error("VMM not found")
@@ -81,17 +88,18 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	// 2. See if we are really dealing with a jailer chroot:
 	expectedItems := []string{
 		"root/dev",
-		fmt.Sprintf("root/%s", filepath.Base(jailingFcConfig.BinaryFirecracker)),
+		fmt.Sprintf("root/%s", filepath.Base(vmmMetadata.Configs.Jailer.BinaryFirecracker)),
 		"root/run",
 	}
 
-	items, globErr := filepath.Glob(jailingFcConfig.JailerChrootDirectory() + "/**/**")
+	items, globErr := filepath.Glob(fullJailerPath + "/**/**")
+
 	if globErr != nil {
 		rootLogger.Error("failed validating chroot directory", "reason", globErr)
 		os.Exit(1)
 	}
 	for idx, entry := range items {
-		items[idx] = strings.TrimPrefix(entry, jailingFcConfig.JailerChrootDirectory()+"/")
+		items[idx] = strings.TrimPrefix(entry, fullJailerPath+"/")
 	}
 	for _, expected := range expectedItems {
 		found := false
@@ -102,13 +110,13 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			}
 		}
 		if !found {
-			rootLogger.Error("directory does not look like a jailer directory", "directory", jailingFcConfig.JailerChrootDirectory())
+			rootLogger.Error("directory does not look like a jailer directory", "directory", fullJailerPath)
 			os.Exit(1)
 		}
 	}
 
 	// Do I have the socket file?
-	socketPath, hasSocket, existsErr := sock.FetchSocketPathIfExists(jailingFcConfig)
+	socketPath, hasSocket, existsErr := sock.FetchSocketPathIfExists(fullJailerPath)
 	if existsErr != nil {
 		rootLogger.Error("failed checking if the VMM socket file exists", "reason", existsErr)
 		os.Exit(1)
@@ -117,12 +125,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	if hasSocket {
 		rootLogger.Info("stopping VMM")
 		fcClient := firecracker.NewClient(socketPath, nil, false)
-
-		runningVMMPid, hasPid, pidErr := pid.FetchPIDIfExists(filepath.Join(runCache.RunCache, commandConfig.VMMID))
-		if pidErr != nil {
-			rootLogger.Error("failed fetching PID file", "reason", pidErr)
-			os.Exit(1)
-		}
 
 		ok, actionErr := fcClient.CreateSyncAction(context.Background(), &models.InstanceActionInfo{
 			ActionType: firecracker.String("SendCtrlAltDel"),
@@ -134,51 +136,41 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			}
 			rootLogger.Info("VMM is already stopped")
 		} else {
-			if hasPid {
-				rootLogger.Info("VMM with pid, waiting for process to exit")
 
-				waitCtx, cancelFunc := context.WithTimeout(context.Background(), commandConfig.ShutdownTimeout)
-				defer cancelFunc()
-				chanErr := make(chan error, 1)
+			rootLogger.Info("VMM with pid, waiting for process to exit")
 
-				go func() {
-					chanErr <- runningVMMPid.Wait(waitCtx)
-				}()
+			waitCtx, cancelFunc := context.WithTimeout(context.Background(), commandConfig.ShutdownTimeout)
+			defer cancelFunc()
+			chanErr := make(chan error, 1)
 
-				select {
-				case <-waitCtx.Done():
-					rootLogger.Error("VMM shutdown wait timed out, unclean shutdown", "reason", waitCtx.Err())
-				case err := <-chanErr:
-					if err != nil {
-						rootLogger.Error("VMM process exit with an error", "reason", err)
-					} else {
-						rootLogger.Info("VMM process exit clean")
-					}
+			go func() {
+				chanErr <- vmmMetadata.PID.Wait(waitCtx)
+			}()
+
+			select {
+			case <-waitCtx.Done():
+				rootLogger.Error("VMM shutdown wait timed out, unclean shutdown", "reason", waitCtx.Err())
+			case err := <-chanErr:
+				if err != nil {
+					rootLogger.Error("VMM process exit with an error", "reason", err)
+				} else {
+					rootLogger.Info("VMM process exit clean")
 				}
-
 			}
+
 			rootLogger.Info("VMM stopped with response", "response", ok)
 		}
 	}
 
-	// have to clean up the CNI network:
-	cniMetadata, hasCniMetadata, cniErr := cni.FetchCNIMetadataIfExists(filepath.Join(runCache.RunCache, commandConfig.VMMID))
-	if cniErr != nil {
-		rootLogger.Error("failed fetching CNI metadata file", "reason", cniErr)
+	rootLogger.Info("cleaning up CNI")
+	if err := cni.CleanupCNI(rootLogger,
+		vmmMetadata.Configs.CNI,
+		commandConfig.VMMID, vmmMetadata.CNI.VethIfaceName,
+		vmmMetadata.CNI.NetName, vmmMetadata.CNI.NetNS); err != nil {
+		rootLogger.Error("failed cleaning up CNI", "reason", err)
 		os.Exit(1)
 	}
-
-	if hasCniMetadata {
-		rootLogger.Info("cleaning up CNI")
-		if err := cni.CleanupCNI(rootLogger,
-			cniMetadata.Config,
-			commandConfig.VMMID, cniMetadata.VethIfaceName,
-			cniMetadata.NetName, cniMetadata.NetNS); err != nil {
-			rootLogger.Error("failed cleaning up CNI", "reason", err)
-			os.Exit(1)
-		}
-		rootLogger.Info("CNI cleaned up")
-	}
+	rootLogger.Info("CNI cleaned up")
 
 	// have to clean up the cache
 	rootLogger.Info("removing the cache directory")
@@ -190,8 +182,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	// have to clean up the jailer
 	rootLogger.Info("removing the jailer directory")
-	if err := os.RemoveAll(jailingFcConfig.JailerChrootDirectory()); err != nil {
-		rootLogger.Error("failed removing jailer directroy", "reason", err, "path", jailingFcConfig.JailerChrootDirectory())
+	if err := os.RemoveAll(fullJailerPath); err != nil {
+		rootLogger.Error("failed removing jailer directroy", "reason", err, "path", fullJailerPath)
 	}
 	rootLogger.Info("jailer directory removed")
 }

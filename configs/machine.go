@@ -8,18 +8,18 @@ import (
 type MachineConfig struct {
 	flagBase
 
-	MachineCNINetworkName        string
-	MachineCPUTemplate           string
-	MachineHTEnabled             bool
-	MachineKernelArgs            string
-	MachineRootDrivePartUUID     string
-	MachineSSHEnableAgentForward bool
-	MachineSSHPort               int
-	MachineSSHUser               string
-	MachineSSHAuthorizedKeysFile string
-	MachineVMLinuxID             string
-	ResourcesCPU                 int64
-	ResourcesMem                 int64
+	MachineCNINetworkName        string `json:"machine-cni-network-name"`
+	MachineCPUTemplate           string `json:"machine-cpu-template"`
+	MachineHTEnabled             bool   `json:"machine-ht-enabled"`
+	MachineKernelArgs            string `json:"machine-kernel-args"`
+	MachineRootDrivePartUUID     string `json:"machine-root-drive-partuuid"`
+	MachineSSHEnableAgentForward bool   `json:"machine-ssh-enable-agent-forward"`
+	MachineSSHPort               int    `json:"machine-ssh-port"`
+	MachineSSHUser               string `json:"machine-ssh-user"`
+	MachineSSHAuthorizedKeysFile string `json:"machine-ssh-authorized-keys-file"`
+	MachineVMLinuxID             string `json:"machine-vmlinux"`
+	ResourcesCPU                 int64  `json:"machine-resources-cpu"`
+	ResourcesMem                 int64  `json:"machine-resources-mem"`
 
 	ShutdownGracefulTimeoutSeconds int
 
