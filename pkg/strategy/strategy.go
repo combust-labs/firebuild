@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,9 +53,17 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 			// we have to make sure that we have the file for the rootfs under
 			// chroot/root/fs-file-name
 
+			var cniIface *firecracker.NetworkInterface
+			for idx, iface := range m.Cfg.NetworkInterfaces {
+				if iface.CNIConfiguration != nil {
+					cniIface = &m.Cfg.NetworkInterfaces[idx]
+					break
+				}
+			}
+
 			logger = logger.Named(PseudoCloudInitName)
 
-			logger.Debug("checking the jailed rootfs file", "path", config.RootfsFileName)
+			logger.Debug("checking the jailed rootfs file", "path", config.RootfsFileName, "hostname", config.Hostname)
 
 			jailedRootfsFile := filepath.Join(config.Chroot, "root", config.RootfsFileName)
 
@@ -107,7 +116,10 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 			if err := impl.injectHostname(); err != nil {
 				return err
 			}
-			if err := impl.injectHosts(); err != nil {
+			if err := impl.injectHosts(cniIface); err != nil {
+				return err
+			}
+			if err := impl.injectNetInfo(cniIface); err != nil {
 				return err
 			}
 			if err := impl.injectSSHKeys(); err != nil {
@@ -227,9 +239,25 @@ func (handler *pseudoCloudInitHandlerImplementation) injectHostname() error {
 	return nil
 }
 
-func (handler *pseudoCloudInitHandlerImplementation) injectHosts() error {
+func (handler *pseudoCloudInitHandlerImplementation) injectHosts(cniIface *firecracker.NetworkInterface) error {
 
 	etcHostsFile := filepath.Join(handler.mountedFsRoot, "/etc/hosts")
+
+	hosts := map[string]string{}
+	for k, v := range defaultHosts {
+		if k == "127.0.0.1" || k == "::1" {
+			if cniIface == nil && handler.config.Hostname != "" {
+				// if there is no CNI interface and hostname is given,
+				// make 127.0.0.1 reply to the hostname
+				v = v + " " + handler.config.Hostname
+			}
+		}
+		hosts[k] = v
+	}
+	if cniIface != nil && handler.config.Hostname != "" {
+		// if there is a CNI interface and we have a hostname, make the hostname reply to the VMM IP:
+		hosts[cniIface.StaticConfiguration.IPConfiguration.IPAddr.IP.String()] = handler.config.Hostname
+	}
 
 	sourceStat, err := utils.CheckIfExistsAndIsRegular(etcHostsFile)
 	if err != nil {
@@ -270,10 +298,10 @@ func (handler *pseudoCloudInitHandlerImplementation) injectHosts() error {
 		return errors.Wrap(err, fmt.Sprintf("failed truncating hosts file '%s'", etcHostsFile))
 	}
 
-	for k, v := range defaultHosts {
+	for k, v := range hosts {
 		hostsLine := k + "\t" + v
 		if k == "127.0.0.1" || k == "::1" {
-			if handler.config.Hostname != "" {
+			if cniIface == nil && handler.config.Hostname != "" {
 				hostsLine = hostsLine + " " + handler.config.Hostname // TODO: change this in the future when it's possible to inject VMM IP
 			}
 		}
@@ -287,6 +315,59 @@ func (handler *pseudoCloudInitHandlerImplementation) injectHosts() error {
 			handler.logger.Error("hosts file bytes written != hosts length", "kv", k+"::"+v, "written", written, "required", len(hostsLine))
 			return errors.New("hosts file write failed: written != length")
 		}
+	}
+
+	return nil
+}
+
+func (handler *pseudoCloudInitHandlerImplementation) injectNetInfo(cniIface *firecracker.NetworkInterface) error {
+
+	if cniIface == nil {
+		return nil
+	}
+
+	netInfoData := map[string]interface{}{
+		"mac-address":   cniIface.StaticConfiguration.MacAddress,
+		"host-dev-name": cniIface.StaticConfiguration.HostDevName,
+		"ip-config": map[string]interface{}{
+			"ip":          cniIface.StaticConfiguration.IPConfiguration.IPAddr.IP.String(),
+			"ip-addr":     cniIface.StaticConfiguration.IPConfiguration.IPAddr.String(),
+			"ip-mask":     cniIface.StaticConfiguration.IPConfiguration.IPAddr.Mask.String(),
+			"ip-net":      cniIface.StaticConfiguration.IPConfiguration.IPAddr.Network(),
+			"gateway":     cniIface.StaticConfiguration.IPConfiguration.Gateway.String(),
+			"nameservers": cniIface.StaticConfiguration.IPConfiguration.Nameservers,
+		},
+	}
+
+	jsonBytes, jsonErr := json.Marshal(&netInfoData)
+	if jsonErr != nil {
+		return jsonErr
+	}
+
+	targetFile := filepath.Join(handler.mountedFsRoot, "/etc/firebuild-netinfo")
+
+	handler.logger.Debug("creating firebuild netinfo file for writing")
+
+	writableFile, fileErr := os.Create(targetFile)
+	if fileErr != nil {
+		return fmt.Errorf("failed creating firebuild netinfo '%s' file for writing: %+v", targetFile, fileErr)
+	}
+
+	defer func() {
+		handler.logger.Debug("closing firebuild netinfo file after writing")
+		if err := writableFile.Close(); err != nil {
+			handler.logger.Error("failed closing firebuild netinfo file AFTER writing", "reason", err)
+		}
+	}()
+
+	written, writeErr := writableFile.Write(jsonBytes)
+	if writeErr != nil {
+		handler.logger.Error("failed writing firebuild netinfo to file", "reason", writeErr)
+		return errors.Wrap(writeErr, "firebuild netinfo file write failed: see error")
+	}
+	if written != len(jsonBytes) {
+		handler.logger.Error("firebuild netinfo file bytes written != firebuild netinfo length", "written", written, "required", len(jsonBytes))
+		return errors.New("firebuild netinfo file write failed: written != length")
 	}
 
 	return nil

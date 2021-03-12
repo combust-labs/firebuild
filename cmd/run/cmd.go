@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/combust-labs/firebuild/cmd"
@@ -17,6 +18,7 @@ import (
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
+	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
 	"github.com/spf13/cobra"
@@ -58,6 +60,10 @@ func init() {
 }
 
 func run(cobraCommand *cobra.Command, _ []string) {
+
+	if commandConfig.Hostname == "" {
+		commandConfig.Hostname = strings.ReplaceAll(namesgenerator.GetRandomName(0), "_", "-")
+	}
 
 	cleanup := utils.NewDefers()
 	defer cleanup.CallAll()
