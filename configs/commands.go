@@ -17,6 +17,7 @@ type BaseOSCommandConfig struct {
 
 	Dockerfile string
 	FSSizeMBs  int
+	Tag        string
 }
 
 // NewBaseOSCommandConfig returns new command configuration.
@@ -29,6 +30,7 @@ func (c *BaseOSCommandConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.StringVar(&c.Dockerfile, "dockerfile", "", "Full path to the base OS Dockerfile")
 		c.flagSet.IntVar(&c.FSSizeMBs, "filesystem-size-mbs", 500, "File system size in megabytes")
+		c.flagSet.StringVar(&c.Tag, "tag", "", "Tag name; if empty, the name FROM value from the Dockerfile will be used")
 	}
 	return c.flagSet
 }

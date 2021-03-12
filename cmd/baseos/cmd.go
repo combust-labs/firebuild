@@ -60,6 +60,13 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
+	if commandConfig.Tag != "" {
+		if !utils.IsValidTag(commandConfig.Tag) {
+			rootLogger.Error("--tag value is invalid", "tag", commandConfig.Tag)
+			os.Exit(1)
+		}
+	}
+
 	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
 	if resolveErr != nil {
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
@@ -204,6 +211,22 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	structuredBase := fromToBuild.ToStructuredFrom()
 
+	resultOrg := structuredBase.Org()
+	resultImage := structuredBase.Image()
+	resultVersion := structuredBase.Version()
+
+	if commandConfig.Tag != "" {
+		ok, org, image, version := utils.TagDecompose(commandConfig.Tag)
+		if !ok {
+			rootLogger.Error("tag defined but failed to parse", "tag", commandConfig.Tag)
+			os.RemoveAll(tempDirectory)
+			os.Exit(1)
+		}
+		resultOrg = org
+		resultImage = image
+		resultVersion = version
+	}
+
 	storeResult, storeErr := storageImpl.StoreRootfsFile(&storage.RootfsStore{
 		LocalPath: rootFSFile,
 		Metadata: metadata.MDBaseOS{
@@ -216,9 +239,9 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			Labels: map[string]string{},
 			Type:   metadata.MetadataTypeBaseOS,
 		},
-		Org:     structuredBase.Org(),
-		Image:   structuredBase.Image(),
-		Version: structuredBase.Version(),
+		Org:     resultOrg,
+		Image:   resultImage,
+		Version: resultVersion,
 	})
 	if storeErr != nil {
 		rootLogger.Error("failed storing built rootfs", "reason", storeErr)
