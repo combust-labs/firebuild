@@ -143,7 +143,7 @@ sudo /usr/local/go/bin/go run ./main.go kill --vmm-id=${VMMID}
 
 ### Purging remains of the VMMs stopped without the kill command
 
-If a VMM exists in any other way than via `kill` command, following data continues residing on the host:
+If a VMM exits in any other way than via `kill` command, following data continues residing on the host:
 
 - jail directory with all contents
 - run cache directory with all contents
