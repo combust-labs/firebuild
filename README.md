@@ -143,7 +143,17 @@ sudo /usr/local/go/bin/go run ./main.go kill --vmm-id=${VMMID}
 
 ### Purging remains of the VMMs stopped without the kill command
 
-TODO: purge command to be implemented
+If a VMM exists in any other way than via `kill` command, following data continues residing on the host:
+
+- jail directory with all contents
+- run cache directory with all contents
+- CNI interface with CNI cache directory
+
+To remove this data, run the `purge` command. 
+
+```sh
+sudo /usr/local/go/bin/go run ./main.go purge
+```
 
 ### List VMMs
 
