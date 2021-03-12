@@ -3,6 +3,8 @@ package utils
 import (
 	"regexp"
 	"strings"
+
+	"github.com/docker/docker/pkg/namesgenerator"
 )
 
 // IsValidHostname validates if a string is a valid host name.
@@ -13,4 +15,9 @@ func IsValidHostname(host string) bool {
 		return true
 	}
 	return false
+}
+
+// RandomHostname returns a new random host name.
+func RandomHostname() string {
+	return strings.ReplaceAll(namesgenerator.GetRandomName(0), "_", "-")
 }
