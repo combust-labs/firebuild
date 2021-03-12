@@ -1,15 +1,17 @@
-package rootfs
+package utils
 
 import "regexp"
 
 const regexpString = "([a-z0-9]{1,60})/([a-z0-9\\-]{1,60}):([a-z0-9.]{1,15})"
 
-func isTagValid(input string) bool {
+// IsValidTag checks if the given image tag is valid.
+func IsValidTag(input string) bool {
 	re := regexp.MustCompile(regexpString)
 	return re.Match([]byte(input))
 }
 
-func tagDecompose(input string) (bool, string, string, string) {
+// TagDecompose decomposes the tag into the image components.
+func TagDecompose(input string) (bool, string, string, string) {
 	re := regexp.MustCompile(regexpString)
 	parts := re.FindSubmatch([]byte(input))
 	if len(parts) == 4 { // must be 4:

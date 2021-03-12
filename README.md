@@ -49,6 +49,16 @@ sudo /usr/local/go/bin/go run ./main.go baseos \
 
 Because the `baseos` root file system is built completely with Docker, there is no need to configure the kernel storage.
 
+It's possible to tag the baseos output using the `--tag=` argument, for example:
+
+```sh
+sudo /usr/local/go/bin/go run ./main.go baseos \
+    --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile \
+    --storage.provider=directory \
+    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --tag=custom/os:latest
+```
+
 ### Why
 
 TODO: explain why is the base operating system rootfs required.

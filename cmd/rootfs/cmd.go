@@ -91,7 +91,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		os.Exit(1)
 	}
 
-	if !isTagValid(commandConfig.Tag) {
+	if !utils.IsValidTag(commandConfig.Tag) {
 		rootLogger.Error("--tag value is invalid", "tag", commandConfig.Tag)
 		os.Exit(1)
 	}
@@ -350,7 +350,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmLogger.Info("Machine is stopped. Persisting the file system...")
 
-	ok, org, name, version := tagDecompose(commandConfig.Tag)
+	ok, org, name, version := utils.TagDecompose(commandConfig.Tag)
 	if !ok {
 		vmmLogger.Error("Tag could not be decomposed", "tag", commandConfig.Tag)
 		return
