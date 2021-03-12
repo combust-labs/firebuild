@@ -2,7 +2,6 @@ package kill
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +9,8 @@ import (
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
+	"github.com/combust-labs/firebuild/pkg/vmm/chroot"
 	"github.com/combust-labs/firebuild/pkg/vmm/cni"
-	"github.com/combust-labs/firebuild/pkg/vmm/sock"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/spf13/cobra"
@@ -64,59 +63,30 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		rootLogger.Error("failed loading metadata", "reason", metadataErr, "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
 		os.Exit(1)
 	}
-
 	if !hasMetadata {
 		rootLogger.Error("run cache directory did not contain the VMM metadata", "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
 		os.Exit(1)
 	}
 
-	fullJailerPath := filepath.Join(vmmMetadata.Configs.Jailer.ChrootBase,
-		filepath.Base(vmmMetadata.Configs.Jailer.BinaryFirecracker),
-		vmmMetadata.VMMID)
-
-	// Check if the VMM ID together with chroot is an actual jailer directory
-
-	// 1. Check if there is anything to do:
-	if _, err := utils.CheckIfExistsAndIsDirectory(fullJailerPath); err != nil {
-		if os.IsNotExist(err) {
-			// nothing to do
-			rootLogger.Error("VMM not found")
-			os.Exit(0)
-		}
-	}
-
-	// 2. See if we are really dealing with a jailer chroot:
-	expectedItems := []string{
-		"root/dev",
-		fmt.Sprintf("root/%s", filepath.Base(vmmMetadata.Configs.Jailer.BinaryFirecracker)),
-		"root/run",
-	}
-
-	items, globErr := filepath.Glob(fullJailerPath + "/**/**")
-
-	if globErr != nil {
-		rootLogger.Error("failed validating chroot directory", "reason", globErr)
+	chrootInst := chroot.NewWithLocation(chroot.LocationFromComponents(vmmMetadata.Configs.Jailer.ChrootBase,
+		vmmMetadata.Configs.Jailer.BinaryFirecracker,
+		vmmMetadata.VMMID))
+	chrootExists, chrootErr := chrootInst.Exists()
+	if chrootErr != nil {
+		rootLogger.Error("error while checking VMM chroot", "reason", chrootErr)
 		os.Exit(1)
 	}
-	for idx, entry := range items {
-		items[idx] = strings.TrimPrefix(entry, fullJailerPath+"/")
+	if !chrootExists {
+		rootLogger.Error("VMM not found, nothing to do")
+		os.Exit(0)
 	}
-	for _, expected := range expectedItems {
-		found := false
-		for _, item := range items {
-			if item == expected {
-				found = true
-				break
-			}
-		}
-		if !found {
-			rootLogger.Error("directory does not look like a jailer directory", "directory", fullJailerPath)
-			os.Exit(1)
-		}
+
+	if err := chrootInst.IsValid(); err != nil {
+		rootLogger.Error("error while inspecting chroot", "reason", err, "chroot", chrootInst.FullPath())
 	}
 
 	// Do I have the socket file?
-	socketPath, hasSocket, existsErr := sock.FetchSocketPathIfExists(fullJailerPath)
+	socketPath, hasSocket, existsErr := chrootInst.SocketPathIfExists()
 	if existsErr != nil {
 		rootLogger.Error("failed checking if the VMM socket file exists", "reason", existsErr)
 		os.Exit(1)
@@ -182,8 +152,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	// have to clean up the jailer
 	rootLogger.Info("removing the jailer directory")
-	if err := os.RemoveAll(fullJailerPath); err != nil {
-		rootLogger.Error("failed removing jailer directroy", "reason", err, "path", fullJailerPath)
+	if err := chrootInst.RemoveAll(); err != nil {
+		rootLogger.Error("failed removing jailer directroy", "reason", err, "path", chrootInst.FullPath())
 	}
 	rootLogger.Info("jailer directory removed")
 }
