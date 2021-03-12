@@ -3,7 +3,6 @@ package vmm
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
@@ -78,7 +77,6 @@ func (p *defaultProvider) Start(ctx context.Context) (StartedMachine, error) {
 		machineConfig:   p.machineConfig,
 		logger:          p.logger,
 		machine:         m,
-		startTime:       time.Now(),
 		vethIfaceName:   p.vethIfaceName,
 	}, nil
 }

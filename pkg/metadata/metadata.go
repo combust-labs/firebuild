@@ -112,6 +112,8 @@ type MDRun struct {
 	CNI               MDRunCNI             `json:"cni"`
 	Configs           MDRunConfigs         `json:"configs"`
 	Drives            []models.Drive       `json:"drivers"`
+	Hostname          string               `json:"hostname"`
+	IdentityFile      string               `json:"identity-file"`
 	NetworkInterfaces []MDNetworkInterafce `json:"network-interfaces"`
 	PID               pid.RunningVMMPID    `json:"pid"`
 	Rootfs            *MDRootfs            `json:"rootfs"`

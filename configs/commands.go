@@ -64,6 +64,35 @@ func (c *KillCommandConfig) Validate() error {
 	return nil
 }
 
+// InspectCommandConfig is the inspect command configuration.
+type InspectCommandConfig struct {
+	flagBase
+	ValidatingConfig
+
+	VMMID string
+}
+
+// NewInspectCommandConfig returns new command configuration.
+func NewInspectCommandConfig() *InspectCommandConfig {
+	return &InspectCommandConfig{}
+}
+
+// FlagSet returns an instance of the flag set for the configuration.
+func (c *InspectCommandConfig) FlagSet() *pflag.FlagSet {
+	if c.initFlagSet() {
+		c.flagSet.StringVar(&c.VMMID, "vmm-id", "", "ID of the VMM to inspect")
+	}
+	return c.flagSet
+}
+
+// Validate validates the correctness of the configuration.
+func (c *InspectCommandConfig) Validate() error {
+	if c.VMMID == "" {
+		return fmt.Errorf("--vmm-id can't be empty")
+	}
+	return nil
+}
+
 // RootfsCommandConfig is the rootfs command configuration.
 type RootfsCommandConfig struct {
 	flagBase

@@ -250,6 +250,11 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	})
 
+	// gather the running vmm metadata:
+	runMetadata := &metadata.MDRun{
+		Type: metadata.MetadataTypeRun,
+	}
+
 	strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
 		Chroot:         jailingFcConfig.JailerChrootDirectory(),
 		RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
@@ -263,6 +268,12 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		AddRequirements(func() *arbitrary.HandlerPlacement {
 			return arbitrary.NewHandlerPlacement(strategy.
 				NewPseudoCloudInitHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
+		}).
+		AddRequirements(func() *arbitrary.HandlerPlacement {
+			// add this one after the previous one so by he logic,
+			// this one will be placed and executed before the first one
+			return arbitrary.NewHandlerPlacement(strategy.
+				NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 		})
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
@@ -280,23 +291,16 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		return
 	}
 
-	machineMetadata, metadataErr := startedMachine.Metadata()
-	if metadataErr != nil {
-		startedMachine.Stop(vmmCtx, nil)
-		vmmLogger.Error("Failed fetching machine metadata", "reason", metadataErr)
-		return
-	}
+	ipAddress := runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP
 
-	ifaceStaticConfig := machineMetadata.NetworkInterfaces[0].StaticConfiguration
+	vmmLogger = vmmLogger.With("ip-address", ipAddress)
 
-	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IP)
-
-	vmmLogger.Info("VMM running", "ip-net", ifaceStaticConfig.IPConfiguration.IPAddr)
+	vmmLogger.Info("VMM running")
 
 	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
 		SSHPrivateKey:      *rsaPrivateKey,
 		SSHUsername:        machineConfig.MachineSSHUser,
-		IP:                 net.IP(ifaceStaticConfig.IPConfiguration.IP),
+		IP:                 net.IP(ipAddress),
 		Port:               machineConfig.MachineSSHPort,
 		EnableAgentForward: machineConfig.MachineSSHEnableAgentForward,
 	}, vmmLogger.Named("remote-client"))

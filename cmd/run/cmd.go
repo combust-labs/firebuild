@@ -192,11 +192,25 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		strategyPublicKeys = append(strategyPublicKeys, sshPublicKey)
 	}
 
+	// gather the running vmm metadata:
+	runMetadata := &metadata.MDRun{
+		Configs: metadata.MDRunConfigs{
+			CNI:     cniConfig,
+			Jailer:  jailingFcConfig,
+			Machine: machineConfig,
+		},
+		Hostname:     commandConfig.Hostname,
+		IdentityFile: commandConfig.IdentityFile,
+		Rootfs:       mdRootfs,
+		RunCache:     cacheDirectory,
+		Type:         metadata.MetadataTypeRun,
+	}
+
 	strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
 		Chroot:         jailingFcConfig.JailerChrootDirectory(),
 		RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
 		SSHUser:        machineConfig.MachineSSHUser,
-
+		Metadata:       runMetadata,
 		// VMM settings:
 		Environment: vmmEnvironment,
 		Hostname:    commandConfig.Hostname,
@@ -207,6 +221,12 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		AddRequirements(func() *arbitrary.HandlerPlacement {
 			return arbitrary.NewHandlerPlacement(strategy.
 				NewPseudoCloudInitHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
+		}).
+		AddRequirements(func() *arbitrary.HandlerPlacement {
+			// add this one after the previous one so by he logic,
+			// this one will be placed and executed before the first one
+			return arbitrary.NewHandlerPlacement(strategy.
+				NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 		})
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
@@ -224,35 +244,29 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		return
 	}
 
-	machineMetadata, metadataErr := startedMachine.Metadata()
+	metadataErr := startedMachine.DecorateMetadata(runMetadata)
 	if metadataErr != nil {
 		startedMachine.Stop(vmmCtx, nil)
 		vmmLogger.Error("Failed fetching machine metadata", "reason", metadataErr)
 		return
 	}
 
-	ifaceStaticConfig := machineMetadata.NetworkInterfaces[0].StaticConfiguration
+	vmmLogger = vmmLogger.With("ip-address", runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
 
-	vmmLogger = vmmLogger.With("ip-address", ifaceStaticConfig.IPConfiguration.IP)
-
-	if err := vmm.WriteMetadataToFile(cacheDirectory, machineMetadata, mdRootfs); err != nil {
-		vmmLogger.Error("failed writing machine metadata to file", "reason", err, "metadata", machineMetadata)
+	if err := vmm.WriteMetadataToFile(runMetadata); err != nil {
+		vmmLogger.Error("failed writing machine metadata to file", "reason", err, "metadata", runMetadata)
 	}
 
 	if commandConfig.Daemonize {
 		vmmLogger.Info("VMM running as a daemon",
-			"ip-net", ifaceStaticConfig.IPConfiguration.IPAddr,
 			"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
-			"cache-dir", cacheDirectory,
-			"pid", machineMetadata.PID.Pid)
+			"cache-dir", cacheDirectory)
 		os.Exit(0) // don't trigger defers
 	}
 
 	vmmLogger.Info("VMM running",
-		"ip-net", ifaceStaticConfig.IPConfiguration.IPAddr,
 		"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
-		"cache-dir", cacheDirectory,
-		"pid", machineMetadata.PID.Pid)
+		"cache-dir", cacheDirectory)
 
 	chanStopStatus := installSignalHandlers(context.Background(), vmmLogger, startedMachine)
 

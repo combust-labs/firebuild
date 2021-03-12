@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
@@ -38,6 +39,8 @@ type PseudoCloudInitHandlerConfig struct {
 	RootfsFileName     string
 	SSHUser            string
 
+	Metadata *metadata.MDRun
+
 	Environment map[string]string
 	Hostname    string
 	PublicKeys  []ssh.PublicKey
@@ -49,9 +52,6 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 	return firecracker.Handler{
 		Name: PseudoCloudInitName,
 		Fn: func(ctx context.Context, m *firecracker.Machine) error {
-
-			// we have to make sure that we have the file for the rootfs under
-			// chroot/root/fs-file-name
 
 			var cniIface *firecracker.NetworkInterface
 			for idx, iface := range m.Cfg.NetworkInterfaces {
@@ -117,6 +117,9 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 				return err
 			}
 			if err := impl.injectHosts(cniIface); err != nil {
+				return err
+			}
+			if err := impl.injectMetadata(); err != nil {
 				return err
 			}
 			if err := impl.injectNetInfo(cniIface); err != nil {
@@ -320,12 +323,27 @@ func (handler *pseudoCloudInitHandlerImplementation) injectHosts(cniIface *firec
 	return nil
 }
 
-func (handler *pseudoCloudInitHandlerImplementation) injectNetInfo(cniIface *firecracker.NetworkInterface) error {
+func (handler *pseudoCloudInitHandlerImplementation) injectMetadata() error {
+	if handler.config.Metadata == nil {
+		return nil
+	}
+	jsonBytes, jsonErr := json.Marshal(handler.config.Metadata)
+	if jsonErr != nil {
+		return jsonErr
+	}
+	targetFile := filepath.Join(handler.mountedFsRoot, "/etc/firebuild-metadata.json")
+	handler.logger.Debug("creating firebuild metadata file for writing")
+	if err := handler.writeBytesAtLocation(jsonBytes, targetFile); err != nil {
+		handler.logger.Error("failed writing firebuild metadata to file", "reason", err)
+		return err
+	}
+	return nil
+}
 
+func (handler *pseudoCloudInitHandlerImplementation) injectNetInfo(cniIface *firecracker.NetworkInterface) error {
 	if cniIface == nil {
 		return nil
 	}
-
 	netInfoData := map[string]interface{}{
 		"mac-address":   cniIface.StaticConfiguration.MacAddress,
 		"host-dev-name": cniIface.StaticConfiguration.HostDevName,
@@ -338,38 +356,16 @@ func (handler *pseudoCloudInitHandlerImplementation) injectNetInfo(cniIface *fir
 			"nameservers": cniIface.StaticConfiguration.IPConfiguration.Nameservers,
 		},
 	}
-
 	jsonBytes, jsonErr := json.Marshal(&netInfoData)
 	if jsonErr != nil {
 		return jsonErr
 	}
-
-	targetFile := filepath.Join(handler.mountedFsRoot, "/etc/firebuild-netinfo")
-
+	targetFile := filepath.Join(handler.mountedFsRoot, "/etc/firebuild-netinfo.json")
 	handler.logger.Debug("creating firebuild netinfo file for writing")
-
-	writableFile, fileErr := os.Create(targetFile)
-	if fileErr != nil {
-		return fmt.Errorf("failed creating firebuild netinfo '%s' file for writing: %+v", targetFile, fileErr)
+	if err := handler.writeBytesAtLocation(jsonBytes, targetFile); err != nil {
+		handler.logger.Error("failed writing firebuild netinfo to file", "reason", err)
+		return err
 	}
-
-	defer func() {
-		handler.logger.Debug("closing firebuild netinfo file after writing")
-		if err := writableFile.Close(); err != nil {
-			handler.logger.Error("failed closing firebuild netinfo file AFTER writing", "reason", err)
-		}
-	}()
-
-	written, writeErr := writableFile.Write(jsonBytes)
-	if writeErr != nil {
-		handler.logger.Error("failed writing firebuild netinfo to file", "reason", writeErr)
-		return errors.Wrap(writeErr, "firebuild netinfo file write failed: see error")
-	}
-	if written != len(jsonBytes) {
-		handler.logger.Error("firebuild netinfo file bytes written != firebuild netinfo length", "written", written, "required", len(jsonBytes))
-		return errors.New("firebuild netinfo file write failed: written != length")
-	}
-
 	return nil
 }
 
@@ -448,6 +444,28 @@ func (handler *pseudoCloudInitHandlerImplementation) injectSSHKeys() error {
 		if written != expectedToWrite {
 			handler.logger.Error("written != len", "written", written, "len", expectedToWrite)
 		}
+	}
+	return nil
+}
+
+func (handler *pseudoCloudInitHandlerImplementation) writeBytesAtLocation(data []byte, location string) error {
+	writableFile, fileErr := os.Create(location)
+	if fileErr != nil {
+		return fmt.Errorf("failed creating file '%s' for writing: %+v", location, fileErr)
+	}
+	defer func() {
+		if err := writableFile.Close(); err != nil {
+			handler.logger.Error("failed closing file AFTER writing", "file", location, "reason", err)
+		}
+	}()
+	written, writeErr := writableFile.Write(data)
+	if writeErr != nil {
+		handler.logger.Error("failed writing to file", "file", location, "reason", writeErr)
+		return errors.Wrap(writeErr, "file write failed: see error")
+	}
+	if written != len(data) {
+		handler.logger.Error("file bytes written != data length", "written", written, "required", len(data))
+		return errors.New("file write failed: written != length")
 	}
 	return nil
 }
