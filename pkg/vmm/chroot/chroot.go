@@ -74,7 +74,6 @@ type defaultChroot struct {
 func (c *defaultChroot) Exists() (bool, error) {
 	if _, err := utils.CheckIfExistsAndIsDirectory(c.loc.FullPath()); err != nil {
 		if os.IsNotExist(err) {
-			// nothing to do
 			return false, nil
 		}
 		return false, err
