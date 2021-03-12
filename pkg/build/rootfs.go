@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/combust-labs/firebuild/build/commands"
-	"github.com/combust-labs/firebuild/build/env"
-	"github.com/combust-labs/firebuild/build/resources"
+	"github.com/combust-labs/firebuild/pkg/build/commands"
+	"github.com/combust-labs/firebuild/pkg/build/env"
+	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/docker/docker/pkg/fileutils"

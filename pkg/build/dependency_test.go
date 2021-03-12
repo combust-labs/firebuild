@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/combust-labs/firebuild/build/commands"
-	"github.com/combust-labs/firebuild/build/reader"
-	"github.com/combust-labs/firebuild/build/stage"
+	"github.com/combust-labs/firebuild/pkg/build/commands"
+	"github.com/combust-labs/firebuild/pkg/build/reader"
+	"github.com/combust-labs/firebuild/pkg/build/stage"
 	"github.com/hashicorp/go-hclog"
 )
 

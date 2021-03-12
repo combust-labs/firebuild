@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/combust-labs/firebuild/build/commands"
-	"github.com/combust-labs/firebuild/build/resources"
+	"github.com/combust-labs/firebuild/pkg/build/commands"
+	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/combust-labs/firebuild/pkg/utils"
 
 	"github.com/hashicorp/go-hclog"

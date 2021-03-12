@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/combust-labs/firebuild/build/commands"
-	"github.com/combust-labs/firebuild/build/resources"
-	"github.com/combust-labs/firebuild/build/stage"
-	"github.com/combust-labs/firebuild/containers"
+	"github.com/combust-labs/firebuild/pkg/build/commands"
+	"github.com/combust-labs/firebuild/pkg/build/resources"
+	"github.com/combust-labs/firebuild/pkg/build/stage"
+	"github.com/combust-labs/firebuild/pkg/containers"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/hashicorp/go-hclog"
 )

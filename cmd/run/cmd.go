@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/combust-labs/firebuild/build/commands"
 	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/storage"

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/combust-labs/firebuild/build/reader"
+	"github.com/combust-labs/firebuild/pkg/build/reader"
 )
 
 func TestMultipleStages(t *testing.T) {
