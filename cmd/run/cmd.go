@@ -201,7 +201,7 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 		// VMM settings:
 		Environment: vmmEnvironment,
-		Hostname:    commandConfig.Hostname, // TODO: validate that the hostname is a valid hostname string
+		Hostname:    commandConfig.Hostname,
 		PublicKeys:  strategyPublicKeys,
 	}
 

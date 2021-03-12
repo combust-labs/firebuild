@@ -188,5 +188,8 @@ func (c *RunCommandConfig) Validate() error {
 			return errors.Wrapf(statErr, "environment file '%s' stat error", envFile)
 		}
 	}
+	if !utils.IsValidHostname(c.Hostname) {
+		return fmt.Errorf("string '%s' is not a valid hostname", c.Hostname)
+	}
 	return nil
 }
