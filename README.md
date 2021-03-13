@@ -44,7 +44,8 @@ Build a base operating system root file system. For example, Debian Buster slim:
 sudo /usr/local/go/bin/go run ./main.go baseos \
     --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile \
     --storage.provider=directory \
-    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs
+    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --tracing-enable
 ```
 
 Because the `baseos` root file system is built completely with Docker, there is no need to configure the kernel storage.
@@ -56,7 +57,8 @@ sudo /usr/local/go/bin/go run ./main.go baseos \
     --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile \
     --storage.provider=directory \
     --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --tag=custom/os:latest
+    --tag=custom/os:latest \
+    --tracing-enable
 ```
 
 ### Why
@@ -80,7 +82,8 @@ sudo /usr/local/go/bin/go run ./main.go rootfs \
     --pre-build-command='chmod 1777 /tmp' \
     --log-as-json \
     --resources-mem=512 \
-    --tag=tests/postgres:13
+    --tag=tests/postgres:13 \
+    --tracing-enable
 ```
 
 TODO: revisit the paragraph below
@@ -102,7 +105,8 @@ sudo /usr/local/go/bin/go run ./main.go run \
     --from=tests/postgres:13 \
     --machine-cni-network-name=alpine \
     --machine-ssh-user=debian \
-    --machine-vmlinux-id=vmlinux-v5.8
+    --machine-vmlinux-id=vmlinux-v5.8 \
+    --tracing-enable
 ```
 
 ### Additional settings
@@ -112,6 +116,7 @@ sudo /usr/local/go/bin/go run ./main.go run \
 - `--env`: environment variable to deploy to configure the VMM with, multiple OK, format `--env=VAR_NAME=value`
 - `--hostname`: hostname to apply to the VMM
 - `--identity-file`: full path to the publish SSH key to deploy to the running VMM
+- `--disable-pseudo-cloud-init`: disables inecting environment variables, hostname and identity files into the VMM
 
 ### Environment merging
 
@@ -197,7 +202,8 @@ sudo /usr/local/go/bin/go run ./main.go rootfs \
     --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
     --log-as-json \
     --tag=tests/consul:1.9.3 \
-    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
+    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh \
+    --tracing-enable
 ```
 
 The URL format is:
@@ -278,8 +284,36 @@ Build v0.2.8 using git repository link, leave SSH access on:
     --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
     --log-as-json \
     --tag=tests/kafka-proxy:0.2.8 \
-    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
+    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh \
+    --tracing-enable
 ```
+
+## Tracing
+
+Start Jaeger, for example:
+
+```sh
+docker run --rm -ti \
+    -e COLLECTOR_ZIPKIN_HTTP_PORT=9411 \
+    -p 5775:5775/udp \
+    -p 6831:6831/udp \
+    -p 6832:6832/udp \
+    -p 5778:5778 \
+    -p 16686:16686 \
+    -p 14268:14268 \
+    -p 14250:14250 \
+    -p 9411:9411 \
+    jaegertracing/all-in-one:1.22
+```
+
+And configure respective commands with:
+
+```sh
+... --tracing-enable \
+--tracing-collector-host-port=... \
+```
+
+The default value of the `--tracing-collector-host-port` is `127.0.0.1:6831`. To enable tracer log output, set `--tracing-log-enable` flag.
 
 ## License
 

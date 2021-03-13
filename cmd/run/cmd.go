@@ -15,10 +15,12 @@ import (
 	"github.com/combust-labs/firebuild/pkg/storage"
 	"github.com/combust-labs/firebuild/pkg/strategy"
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
+	"github.com/combust-labs/firebuild/pkg/tracing"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
+	"github.com/opentracing/opentracing-go"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 )
@@ -39,6 +41,7 @@ var (
 	logConfig        = configs.NewLogginConfig()
 	machineConfig    = configs.NewMachineConfig()
 	runCache         = configs.NewRunCacheConfig()
+	tracingConfig    = configs.NewTracingConfig("vmm-run")
 )
 
 func initFlags() {
@@ -49,6 +52,7 @@ func initFlags() {
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
 	Command.Flags().AddFlagSet(runCache.FlagSet())
+	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 	// Storage provider flags:
 	cmd.AddStorageFlags(Command.Flags())
 }
@@ -58,20 +62,45 @@ func init() {
 }
 
 func run(cobraCommand *cobra.Command, _ []string) {
+	os.Exit(processCommand())
+}
+
+func processCommand() int {
 
 	if commandConfig.Hostname == "" {
 		commandConfig.Hostname = utils.RandomHostname()
 	}
+
+	regularDefers := utils.NewDefers()
+	defer regularDefers.CallAll()
 
 	cleanup := utils.NewDefers()
 	defer cleanup.CallAll()
 
 	rootLogger := logConfig.NewLogger("run")
 
+	// tracing:
+
+	rootLogger.Info("configuring tracing", "enabled", tracingConfig.Enable, "application-name", tracingConfig.ApplicationName)
+
+	tracer, tracerCleanupFunc, tracerErr := tracing.GetTracer(rootLogger.Named("tracer"), tracingConfig)
+	if tracerErr != nil {
+		rootLogger.Error("failed constructing tracer", "reason", tracerErr)
+		return 1
+	}
+
+	regularDefers.Add(tracerCleanupFunc)
+
+	spanRun := tracer.StartSpan("run")
+	spanRun.SetTag("vmm-id", jailingFcConfig.VMMID())
+	spanRun.SetTag("hostname", commandConfig.Hostname)
+	defer spanRun.Finish()
+
+	// storage:
 	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
 	if resolveErr != nil {
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
-		os.Exit(1)
+		return 1
 	}
 
 	validatingConfigs := []configs.ValidatingConfig{
@@ -83,20 +112,22 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	for _, validatingConfig := range validatingConfigs {
 		if err := validatingConfig.Validate(); err != nil {
 			rootLogger.Error("configuration is invalid", "reason", err)
-			os.Exit(1)
+			return 1
 		}
 	}
+
+	spanCacheCreate := tracer.StartSpan("create-cache-dir", opentracing.ChildOf(spanRun.Context()))
 
 	// create cache directory:
 	if err := os.MkdirAll(runCache.RunCache, 0755); err != nil {
 		rootLogger.Error("failed creating run cache directory", "reason", err)
-		os.Exit(1)
+		return 1
 	}
 
 	cacheDirectory := filepath.Join(runCache.RunCache, jailingFcConfig.VMMID())
 	if err := os.Mkdir(cacheDirectory, 0755); err != nil {
 		rootLogger.Error("failed creating run VMM cache directory", "reason", err)
-		os.Exit(1)
+		return 1
 	}
 
 	cleanup.Add(func() {
@@ -106,15 +137,22 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	})
 
+	spanCacheCreate.Finish()
+
+	spanResolveKernel := tracer.StartSpan("run-resolve-kernel", opentracing.ChildOf(spanCacheCreate.Context()))
+
 	// resolve kernel:
 	resolvedKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
 		ID: machineConfig.MachineVMLinuxID,
 	})
 	if kernelResolveErr != nil {
 		rootLogger.Error("failed resolving kernel", "reason", kernelResolveErr)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
+		return 1
 	}
+
+	spanResolveKernel.Finish()
+
+	spanResolveRootfs := tracer.StartSpan("run-resolve-rootfs", opentracing.ChildOf(spanResolveKernel.Context()))
 
 	// resolve rootfs:
 	from := commands.From{BaseImage: commandConfig.From}
@@ -126,17 +164,23 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	})
 	if rootfsResolveErr != nil {
 		rootLogger.Error("failed resolving rootfs", "reason", rootfsResolveErr)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
+		return 1
 	}
+
+	spanResolveRootfs.Finish()
+
+	spanRootfsMetadata := tracer.StartSpan("run-rootfs-metadata", opentracing.ChildOf(spanResolveRootfs.Context()))
 
 	// the metadata here must be MDRootfs:
 	mdRootfs, unwrapErr := metadata.MDRootfsFromInterface(resolvedRootfs.Metadata().(map[string]interface{}))
 	if unwrapErr != nil {
 		rootLogger.Error("failed unwrapping metadata", "reason", unwrapErr)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
+		return 1
 	}
+
+	spanRootfsMetadata.Finish()
+
+	spanRootfsCopy := tracer.StartSpan("run-rootfs-copy", opentracing.ChildOf(spanRootfsMetadata.Context()))
 
 	// we do need to copy the rootfs file to a temp directory
 	// because the jailer directory indeed links to the target rootfs
@@ -147,25 +191,20 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			"source", resolvedRootfs.HostPath(),
 			"target", runRootfs,
 			"reason", err)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
+		return 1
 	}
+
+	spanRootfsCopy.Finish()
 
 	// get the veth interface name and write to also to a file:
 	vethIfaceName := naming.GetRandomVethName()
+	spanRun.SetTag("ifname", vethIfaceName)
 
 	// don't use resolvedRootfs.HostPath() below this point:
 	machineConfig.
 		WithDaemonize(commandConfig.Daemonize).
 		WithKernelOverride(resolvedKernel.HostPath()).
 		WithRootfsOverride(runRootfs)
-
-	vmmEnvironment, envErr := commandConfig.MergedEnvironment()
-	if envErr != nil {
-		rootLogger.Error("failed merging environment", "reason", envErr)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
-	}
 
 	vmmLogger := rootLogger.With("vmm-id", jailingFcConfig.VMMID(), "veth-name", vethIfaceName)
 
@@ -181,17 +220,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		}
 	})
 
-	strategyPublicKeys := []ssh.PublicKey{}
-	if commandConfig.IdentityFile != "" {
-		sshPublicKey, readErr := utils.SSHPublicKeyFromFile(commandConfig.IdentityFile)
-		if readErr != nil {
-			rootLogger.Error("failed reading an SSH key configured with --identity-file", "reason", readErr)
-			cleanup.CallAll() // manually - defers don't run on os.Exit
-			os.Exit(1)
-		}
-		strategyPublicKeys = append(strategyPublicKeys, sshPublicKey)
-	}
-
 	// gather the running vmm metadata:
 	runMetadata := &metadata.MDRun{
 		Configs: metadata.MDRunConfigs{
@@ -206,31 +234,53 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		Type:         metadata.MetadataTypeRun,
 	}
 
-	strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
-		Chroot:         jailingFcConfig.JailerChrootDirectory(),
-		RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
-		SSHUser:        machineConfig.MachineSSHUser,
-		Metadata:       runMetadata,
-		// VMM settings:
-		Environment: vmmEnvironment,
-		Hostname:    commandConfig.Hostname,
-		PublicKeys:  strategyPublicKeys,
-	}
+	vmmStrategy := configs.DefaultFirectackerStrategy(machineConfig)
 
-	strategy := configs.DefaultFirectackerStrategy(machineConfig).
-		AddRequirements(func() *arbitrary.HandlerPlacement {
+	if !commandConfig.DisablePseudoCloudInit {
+		vmmEnvironment, envErr := commandConfig.MergedEnvironment()
+		if envErr != nil {
+			rootLogger.Error("failed merging environment", "reason", envErr)
+			return 1
+		}
+		strategyPublicKeys := []ssh.PublicKey{}
+		if commandConfig.IdentityFile != "" {
+			sshPublicKey, readErr := utils.SSHPublicKeyFromFile(commandConfig.IdentityFile)
+			if readErr != nil {
+				rootLogger.Error("failed reading an SSH key configured with --identity-file", "reason", readErr)
+				return 1
+			}
+			strategyPublicKeys = append(strategyPublicKeys, sshPublicKey)
+		}
+		strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
+			Chroot:         jailingFcConfig.JailerChrootDirectory(),
+			RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
+			SSHUser:        machineConfig.MachineSSHUser,
+			Metadata:       runMetadata,
+			// VMM settings:
+			Environment: vmmEnvironment,
+			Hostname:    commandConfig.Hostname,
+			PublicKeys:  strategyPublicKeys,
+
+			SpanContext: spanRootfsCopy.Context(),
+			Tracer:      tracer,
+		}
+		vmmStrategy = vmmStrategy.AddRequirements(func() *arbitrary.HandlerPlacement {
 			return arbitrary.NewHandlerPlacement(strategy.
 				NewPseudoCloudInitHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
-		}).
-		AddRequirements(func() *arbitrary.HandlerPlacement {
-			// add this one after the previous one so by he logic,
-			// this one will be placed and executed before the first one
-			return arbitrary.NewHandlerPlacement(strategy.
-				NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 		})
+	}
+
+	vmmStrategy = vmmStrategy.AddRequirements(func() *arbitrary.HandlerPlacement {
+		// add this one after the previous one so by he logic,
+		// this one will be placed and executed before the first one
+		return arbitrary.NewHandlerPlacement(strategy.
+			NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
+	})
+
+	spanVMMCreate := tracer.StartSpan("run-vmm-create", opentracing.ChildOf(spanRootfsCopy.Context()))
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
-		WithHandlersAdapter(strategy).
+		WithHandlersAdapter(vmmStrategy).
 		WithVethIfaceName(vethIfaceName)
 
 	vmmCtx, vmmCancel := context.WithCancel(context.Background())
@@ -238,30 +288,42 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		vmmCancel()
 	})
 
+	spanVMMCreate.Finish()
+
+	spanVMMStart := tracer.StartSpan("run-vmm-start", opentracing.ChildOf(spanVMMCreate.Context()))
+
 	startedMachine, runErr := vmmProvider.Start(vmmCtx)
 	if runErr != nil {
 		vmmLogger.Error("firecracker VMM did not start, run failed", "reason", runErr)
-		return
+		return 1
 	}
+
+	spanVMMStart.Finish()
 
 	metadataErr := startedMachine.DecorateMetadata(runMetadata)
 	if metadataErr != nil {
 		startedMachine.Stop(vmmCtx, nil)
 		vmmLogger.Error("Failed fetching machine metadata", "reason", metadataErr)
-		return
+		return 1
 	}
 
 	vmmLogger = vmmLogger.With("ip-address", runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
+	spanRun.SetTag("ip", runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
+
+	spanVMMStarted := tracer.StartSpan("run-vmm-started", opentracing.ChildOf(spanVMMStart.Context()))
 
 	if err := vmm.WriteMetadataToFile(runMetadata); err != nil {
 		vmmLogger.Error("failed writing machine metadata to file", "reason", err, "metadata", runMetadata)
 	}
 
+	spanVMMStarted.Finish()
+
 	if commandConfig.Daemonize {
 		vmmLogger.Info("VMM running as a daemon",
 			"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
 			"cache-dir", cacheDirectory)
-		os.Exit(0) // don't trigger defers
+		cleanup.Trigger(false) // do not trigger cleanup defers
+		return 0
 	}
 
 	vmmLogger.Info("VMM running",
@@ -270,10 +332,16 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	chanStopStatus := installSignalHandlers(context.Background(), vmmLogger, startedMachine)
 
+	spanVMMStop := tracer.StartSpan("run-vmm-stop", opentracing.ChildOf(spanVMMStarted.Context()))
+
 	startedMachine.Wait(context.Background())
 	startedMachine.Cleanup(chanStopStatus)
 
 	vmmLogger.Info("machine is stopped", "gracefully", <-chanStopStatus)
+
+	spanVMMStop.Finish()
+
+	return 0
 
 }
 
