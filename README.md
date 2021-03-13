@@ -304,10 +304,9 @@ And configure respective commands with:
 ```sh
 ... --tracing-enable \
 --tracing-collector-host-port=... \
---tracing-application-name=...
 ```
 
-The default value of the `--tracing-collector-host-port` is `127.0.0.1:6831`. The default value of the `--tracing-application-name` equals the `--hostname` value, which if not set, is a random name. To enable tracer log output, set `--tracing-log-enable` flag.
+The default value of the `--tracing-collector-host-port` is `127.0.0.1:6831`. To enable tracer log output, set `--tracing-log-enable` flag.
 
 ## License
 
