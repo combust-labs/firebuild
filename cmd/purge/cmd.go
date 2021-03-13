@@ -88,19 +88,19 @@ func processCommand() int {
 		// see if the metadata file can be loaded:
 		fsentry := fileInfo.Name()
 
-		spanVMM := tracer.StartSpan("vmm-fetch-metadata", opentracing.ChildOf(spanPurge.Context()))
-		spanVMM.SetTag("fs-entry", fsentry)
+		spanMetadata := tracer.StartSpan("vmm-fetch-metadata", opentracing.ChildOf(spanPurge.Context()))
+		spanMetadata.SetTag("fs-entry", fsentry)
 
 		vmmMetadata, hasMetadata, err := vmm.FetchMetadataIfExists(filepath.Join(runCache.RunCache, fsentry))
 		if err != nil {
 			rootLogger.Error("metadata error for cache entry, skipping", "fs-entry", fsentry, "reason", err)
-			spanVMM.SetBaggageItem("error", err.Error())
-			spanVMM.Finish()
+			spanMetadata.SetBaggageItem("error", err.Error())
+			spanMetadata.Finish()
 			continue
 		}
 
-		spanVMM.SetTag("has-metadata", hasMetadata)
-		spanVMM.Finish()
+		spanMetadata.SetTag("has-metadata", hasMetadata)
+		spanMetadata.Finish()
 
 		if hasMetadata {
 
@@ -117,7 +117,7 @@ func processCommand() int {
 				continue
 			}
 
-			spanPurgeChroot := tracer.StartSpan("vmm-purge-chroot", opentracing.ChildOf(spanVMM.Context()))
+			spanPurgeChroot := tracer.StartSpan("vmm-purge-chroot", opentracing.ChildOf(spanMetadata.Context()))
 			spanPurgeChroot.SetTag("fs-entry", fsentry)
 
 			// get the chroot:
@@ -142,7 +142,7 @@ func processCommand() int {
 
 			spanPurgeChroot.Finish()
 
-			spanPurgeCNI := tracer.StartSpan("vmm-purge-cni", opentracing.ChildOf(spanVMM.Context()))
+			spanPurgeCNI := tracer.StartSpan("vmm-purge-cni", opentracing.ChildOf(spanPurgeChroot.Context()))
 			spanPurgeCNI.SetTag("fs-entry", fsentry)
 
 			if err := cni.CleanupCNI(rootLogger,
