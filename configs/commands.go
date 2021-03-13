@@ -159,12 +159,13 @@ type RunCommandConfig struct {
 	flagBase
 	ValidatingConfig
 
-	Daemonize    bool
-	EnvFiles     []string
-	EnvVars      map[string]string
-	From         string
-	IdentityFile string
-	Hostname     string
+	Daemonize              bool
+	DisablePseudoCloudInit bool
+	EnvFiles               []string
+	EnvVars                map[string]string
+	From                   string
+	IdentityFile           string
+	Hostname               string
 }
 
 // NewRunCommandConfig returns new command configuration.
@@ -176,6 +177,7 @@ func NewRunCommandConfig() *RunCommandConfig {
 func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.BoolVar(&c.Daemonize, "daemonize", false, "When set, runs the VMM in the detached mode")
+		c.flagSet.BoolVar(&c.DisablePseudoCloudInit, "disable-pseudo-cloud-init", false, "If set, no pseudo cloud init operations are executed on run")
 		c.flagSet.StringArrayVar(&c.EnvFiles, "env-file", []string{}, "Full path to an environment file to apply to the VMM during bootstrap, multiple OK")
 		c.flagSet.StringToStringVar(&c.EnvVars, "env", map[string]string{}, "Additional environment variables to apply to the VMM during bootstrap, multiple OK")
 		c.flagSet.StringVar(&c.From, "from", "", "The image to launch from, for example: tests/postgres:13")

@@ -281,6 +281,34 @@ Build v0.2.8 using git repository link, leave SSH access on:
     --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
 ```
 
+## Tracing
+
+Start Jaeger, for example:
+
+```sh
+docker run --rm -ti \
+    -e COLLECTOR_ZIPKIN_HTTP_PORT=9411 \
+    -p 5775:5775/udp \
+    -p 6831:6831/udp \
+    -p 6832:6832/udp \
+    -p 5778:5778 \
+    -p 16686:16686 \
+    -p 14268:14268 \
+    -p 14250:14250 \
+    -p 9411:9411 \
+    jaegertracing/all-in-one:1.22
+```
+
+And configure respective commands with:
+
+```sh
+... --tracing-enable \
+--tracing-collector-host-port=... \
+--tracing-application-name=...
+```
+
+The default value of the `--tracing-collector-host-port` is `127.0.0.1:6831`. The default value of the `--tracing-application-name` equals the `--hostname` value, which if not set, is a random name. To enable tracer log output, set `--tracing-log-enable` flag.
+
 ## License
 
 Unless explcitly stated: AGPL-3.0 License.
