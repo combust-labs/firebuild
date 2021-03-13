@@ -52,10 +52,9 @@ func initFlags() {
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
 	Command.Flags().AddFlagSet(runCache.FlagSet())
+	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 	// Storage provider flags:
 	cmd.AddStorageFlags(Command.Flags())
-	// tracing:
-	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 }
 
 func init() {
@@ -95,6 +94,7 @@ func processCommand() int {
 	spanRun := tracer.StartSpan("run")
 	spanRun.SetTag("vmm-id", jailingFcConfig.VMMID())
 	spanRun.SetTag("hostname", commandConfig.Hostname)
+	defer spanRun.Finish()
 
 	// storage:
 	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
@@ -317,7 +317,6 @@ func processCommand() int {
 	}
 
 	spanVMMStarted.Finish()
-	spanRun.Finish()
 
 	if commandConfig.Daemonize {
 		vmmLogger.Info("VMM running as a daemon",
