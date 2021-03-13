@@ -2,6 +2,7 @@ package rootfs
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -19,6 +20,8 @@ import (
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/combust-labs/firebuild/pkg/storage"
+	"github.com/combust-labs/firebuild/pkg/tracing"
+	"github.com/opentracing/opentracing-go"
 
 	"github.com/combust-labs/firebuild/pkg/strategy"
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
@@ -44,6 +47,7 @@ var (
 	jailingFcConfig  = configs.NewJailingFirecrackerConfig()
 	logConfig        = configs.NewLogginConfig()
 	machineConfig    = configs.NewMachineConfig()
+	tracingConfig    = configs.NewTracingConfig("firebuild-rootfs")
 	rsaKeySize       = 4096
 )
 
@@ -54,6 +58,7 @@ func initFlags() {
 	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
+	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 	// Storage provider flags:
 	cmd.AddStorageFlags(Command.Flags())
 }
@@ -63,16 +68,38 @@ func init() {
 }
 
 func run(cobraCommand *cobra.Command, _ []string) {
+	os.Exit(processCommand())
+}
+
+func processCommand() int {
 
 	cleanup := utils.NewDefers()
 	defer cleanup.CallAll()
 
 	rootLogger := logConfig.NewLogger("rootfs")
 
+	// tracing:
+
+	rootLogger.Info("configuring tracing", "enabled", tracingConfig.Enable, "application-name", tracingConfig.ApplicationName)
+
+	tracer, tracerCleanupFunc, tracerErr := tracing.GetTracer(rootLogger.Named("tracer"), tracingConfig)
+	if tracerErr != nil {
+		rootLogger.Error("failed constructing tracer", "reason", tracerErr)
+		return 1
+	}
+
+	cleanup.Add(tracerCleanupFunc)
+
+	spanBuild := tracer.StartSpan("build-rootfs")
+	cleanup.Add(func() {
+		spanBuild.Finish()
+	})
+
 	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
 	if resolveErr != nil {
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
-		os.Exit(1)
+		spanBuild.SetBaggageItem("error", resolveErr.Error())
+		return 1
 	}
 
 	validatingConfigs := []configs.ValidatingConfig{
@@ -82,53 +109,79 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	for _, validatingConfig := range validatingConfigs {
 		if err := validatingConfig.Validate(); err != nil {
 			rootLogger.Error("Configuration is invalid", "reason", err)
-			os.Exit(1)
+			spanBuild.SetBaggageItem("error", err.Error())
+			return 1
 		}
 	}
 
 	if commandConfig.Tag == "" {
 		rootLogger.Error("--tag is required")
-		os.Exit(1)
+		spanBuild.SetBaggageItem("error", "--tag is required")
+		return 1
 	}
 
 	if !utils.IsValidTag(commandConfig.Tag) {
 		rootLogger.Error("--tag value is invalid", "tag", commandConfig.Tag)
-		os.Exit(1)
+		spanBuild.SetBaggageItem("error", fmt.Errorf("--tag value is invalid: '%s'", commandConfig.Tag).Error())
+		return 1
 	}
+
+	spanTempDir := tracer.StartSpan("rootfs-temp-dir", opentracing.ChildOf(spanBuild.Context()))
 
 	tempDirectory, err := ioutil.TempDir("", "")
 	if err != nil {
 		rootLogger.Error("Failed creating temporary build directory", "reason", err)
-		os.Exit(1)
+		spanTempDir.SetBaggageItem("error", err.Error())
+		spanTempDir.Finish()
+		return 1
 	}
 
 	cleanup.Add(func() {
+		span := tracer.StartSpan("rootfs-temp-dir", opentracing.ChildOf(spanTempDir.Context()))
 		rootLogger.Info("cleaning up temp build directory")
 		if err := os.RemoveAll(tempDirectory); err != nil {
 			rootLogger.Info("temp build directory removal status", "error", err)
+			span.SetBaggageItem("error", err.Error())
 		}
+		span.Finish()
 	})
+
+	spanTempDir.Finish()
+
+	spanGenerateKeys := tracer.StartSpan("rootfs-generate-keys", opentracing.ChildOf(spanTempDir.Context()))
 
 	rsaPrivateKey, rsaPrivateKeyErr := utils.GenerateRSAPrivateKey(rsaKeySize)
 	if rsaPrivateKeyErr != nil {
 		rootLogger.Error("failed generating private key for the VMM build", "reason", rsaPrivateKeyErr)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
+		spanGenerateKeys.SetBaggageItem("error", rsaPrivateKeyErr.Error())
+		spanGenerateKeys.Finish()
+		return 1
 	}
 	sshPublicKey, sshPublicKeyErr := utils.GetSSHKey(rsaPrivateKey)
 	if sshPublicKeyErr != nil {
 		rootLogger.Error("failed generating public SSH key from the private RSA key", "reason", sshPublicKeyErr)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
+		spanGenerateKeys.SetBaggageItem("error", sshPublicKeyErr.Error())
+		spanGenerateKeys.Finish()
+		return 1
 	}
 
+	spanGenerateKeys.Finish()
+
 	// -- Command specific:
+
+	spanParseDockerfile := tracer.StartSpan("rootfs-parse-dockerfile", opentracing.ChildOf(spanGenerateKeys.Context()))
 
 	readResults, err := reader.ReadFromString(commandConfig.Dockerfile, tempDirectory)
 	if err != nil {
 		rootLogger.Error("failed parsing Dockerfile", "reason", err)
-		os.Exit(1)
+		spanParseDockerfile.SetBaggageItem("error", err.Error())
+		spanParseDockerfile.Finish()
+		return 1
 	}
+
+	spanParseDockerfile.Finish()
+
+	spanReadStages := tracer.StartSpan("rootfs-read-stages", opentracing.ChildOf(spanParseDockerfile.Context()))
 
 	scs, errs := stage.ReadStages(readResults.Commands())
 	for _, err := range errs {
@@ -138,22 +191,30 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	unnamed := scs.Unnamed()
 	if len(unnamed) != 1 {
 		rootLogger.Error("expected exactly one unnamed build stage but found", "num-unnamed", len(unnamed))
-		os.Exit(1)
+		spanReadStages.SetBaggageItem("error", "unnamed stages count must be 1")
+		spanReadStages.Finish()
+		return 1
 	}
 
 	mainStage := unnamed[0]
 	if !mainStage.IsValid() {
 		rootLogger.Error("main build stage invalid: no base to build from")
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
+		spanReadStages.SetBaggageItem("error", "main build stage is invalid")
+		spanReadStages.Finish()
+		return 1
 	}
+
+	spanReadStages.Finish()
+
+	spanBuildContext := tracer.StartSpan("rootfs-build-context", opentracing.ChildOf(spanReadStages.Context()))
 
 	// The first thing to do is to resolve the Dockerfile:
 	buildContext := build.NewDefaultBuild()
 	if err := buildContext.AddInstructions(unnamed[0].Commands()...); err != nil {
 		rootLogger.Error("commands could not be processed", "reason", err)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
+		spanBuildContext.SetBaggageItem("error", err.Error())
+		spanBuildContext.Finish()
+		return 1
 	}
 
 	structuredFrom := buildContext.From().ToStructuredFrom()
@@ -179,22 +240,31 @@ func run(cobraCommand *cobra.Command, _ []string) {
 				dependencyStage := scs.NamedStage(dependency)
 				if dependencyStage == nil {
 					rootLogger.Error("main build stage depends on non-existent stage", "dependency", dependency)
-					cleanup.CallAll() // manually - defers don't run on os.Exit
-					os.Exit(1)
+					spanBuildContext.SetBaggageItem("error", "depends on non-existing stage")
+					spanBuildContext.Finish()
+					return 1
 				}
+				spanDependencyBuild := tracer.StartSpan("rootfs-build-dependency", opentracing.ChildOf(spanBuildContext.Context()))
 				dependencyBuilder := build.NewDefaultDependencyBuild(dependencyStage, tempDirectory, filepath.Join(tempDirectory, "sources"))
 				resolvedResources, buildError := dependencyBuilder.Build(requiredCopies)
 				if buildError != nil {
 					rootLogger.Error("failed building stage dependency", "stage", stage.Name(), "dependency", dependency, "reason", buildError)
-					cleanup.CallAll() // manually - defers don't run on os.Exit
-					os.Exit(1)
+					spanDependencyBuild.SetBaggageItem("error", buildError.Error())
+					spanDependencyBuild.Finish()
+					spanBuildContext.Finish()
+					return 1
 				}
 				dependencyResources[dependency] = resolvedResources
+				spanDependencyBuild.Finish()
 			}
 		}
 	}
 
+	spanBuildContext.Finish()
+
 	// -- Command specific // END
+
+	spanResolveKernel := tracer.StartSpan("rootfs-resolve-kernel", opentracing.ChildOf(spanBuildContext.Context()))
 
 	// resolve kernel:
 	resolvedKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
@@ -202,8 +272,14 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	})
 	if kernelResolveErr != nil {
 		rootLogger.Error("failed resolving kernel", "reason", kernelResolveErr)
-		os.Exit(1)
+		spanResolveKernel.SetBaggageItem("error", kernelResolveErr.Error())
+		spanResolveKernel.Finish()
+		return 1
 	}
+
+	spanResolveKernel.Finish()
+
+	spanResolveRootfs := tracer.StartSpan("rootfs-resolve-rootfs", opentracing.ChildOf(spanResolveKernel.Context()))
 
 	// resolve rootfs:
 	resolvedRootfs, rootfsResolveErr := storageImpl.FetchRootfs(&storage.RootfsLookup{
@@ -213,8 +289,14 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	})
 	if rootfsResolveErr != nil {
 		rootLogger.Error("failed resolving rootfs", "reason", rootfsResolveErr)
-		os.Exit(1)
+		spanResolveRootfs.SetBaggageItem("error", rootfsResolveErr.Error())
+		spanResolveRootfs.Finish()
+		return 1
 	}
+
+	spanResolveRootfs.Finish()
+
+	spanRootfsCopy := tracer.StartSpan("rootfs-copy", opentracing.ChildOf(spanResolveRootfs.Context()))
 
 	// we do need to copy the rootfs file to a temp directory
 	// because the jailer directory indeed links to the target rootfs
@@ -225,9 +307,12 @@ func run(cobraCommand *cobra.Command, _ []string) {
 			"source", resolvedRootfs.HostPath(),
 			"target", buildRootfs,
 			"reason", err)
-		cleanup.CallAll() // manually - defers don't run on os.Exit
-		os.Exit(1)
+		spanRootfsCopy.SetBaggageItem("error", err.Error())
+		spanRootfsCopy.Finish()
+		return 1
 	}
+
+	spanRootfsCopy.Finish()
 
 	// don't use resolvedRootfs.HostPath() below this point:
 	machineConfig.
@@ -244,10 +329,13 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		"jail", jailingFcConfig.JailerChrootDirectory())
 
 	cleanup.Add(func() {
+		span := tracer.StartSpan("rootfs-cleanup-temp", opentracing.ChildOf(spanBuild.Context()))
 		vmmLogger.Info("cleaning up jail directory")
 		if err := os.RemoveAll(jailingFcConfig.JailerChrootDirectory()); err != nil {
 			vmmLogger.Info("jail directory removal status", "error", err)
+			span.SetBaggageItem("error", err.Error())
 		}
+		span.Finish()
 	})
 
 	// gather the running vmm metadata:
@@ -262,6 +350,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		PublicKeys: []ssh.PublicKey{
 			sshPublicKey,
 		},
+		Tracer:      tracer,
+		SpanContext: spanRootfsCopy.Context(),
 	}
 
 	strategy := configs.DefaultFirectackerStrategy(machineConfig).
@@ -276,6 +366,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 				NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 		})
 
+	spanVMMCreate := tracer.StartSpan("rootfs-vmm-create", opentracing.ChildOf(spanRootfsCopy.Context()))
+
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
 		WithHandlersAdapter(strategy).
 		WithVethIfaceName(vethIfaceName)
@@ -285,11 +377,19 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		vmmCancel()
 	})
 
+	spanVMMCreate.Finish()
+
+	spanVMMStart := tracer.StartSpan("rootfs-vmm-start", opentracing.ChildOf(spanVMMCreate.Context()))
+
 	startedMachine, runErr := vmmProvider.Start(vmmCtx)
 	if runErr != nil {
 		vmmLogger.Error("Firecracker VMM did not start, build failed", "reason", runErr)
-		return
+		spanVMMStart.SetBaggageItem("error", runErr.Error())
+		spanVMMStart.Finish()
+		return 1
 	}
+
+	spanVMMStart.Finish()
 
 	ipAddress := runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP
 
@@ -297,10 +397,12 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	vmmLogger.Info("VMM running")
 
+	spanRemoteConnect := tracer.StartSpan("rootfs-remote-connect", opentracing.ChildOf(spanVMMStart.Context()))
+
 	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
 		SSHPrivateKey:      *rsaPrivateKey,
 		SSHUsername:        machineConfig.MachineSSHUser,
-		IP:                 net.IP(ipAddress),
+		IP:                 net.ParseIP(ipAddress),
 		Port:               machineConfig.MachineSSHPort,
 		EnableAgentForward: machineConfig.MachineSSHEnableAgentForward,
 	}, vmmLogger.Named("remote-client"))
@@ -308,19 +410,27 @@ func run(cobraCommand *cobra.Command, _ []string) {
 	if remoteErr != nil {
 		startedMachine.Stop(vmmCtx, nil)
 		vmmLogger.Error("Failed connecting to remote", "reason", remoteErr)
-		return
+		spanRemoteConnect.SetBaggageItem("error", remoteErr.Error())
+		spanRemoteConnect.Finish()
+		return 1
 	}
+
+	spanRemoteConnect.Finish()
 
 	vmmLogger.Info("Connected via SSH")
 
 	if !egressTestConfig.EgressNoWait {
+		spanEgressWait := tracer.StartSpan("rootfs-egress-wait", opentracing.ChildOf(spanRemoteConnect.Context()))
 		egressCtx, egressWaitCancelFunc := context.WithTimeout(vmmCtx, time.Second*time.Duration(egressTestConfig.EgressTestTimeoutSeconds))
 		defer egressWaitCancelFunc()
 		if err := remoteClient.WaitForEgress(egressCtx, egressTestConfig.EgressTestTarget); err != nil {
 			startedMachine.Stop(vmmCtx, remoteClient)
 			vmmLogger.Error("Did not get egress connectivity within a timeout", "reason", err)
-			return
+			spanEgressWait.SetBaggageItem("error", err.Error())
+			spanEgressWait.Finish()
+			return 1
 		}
+		spanEgressWait.Finish()
 	} else {
 		vmmLogger.Debug("Egress test explicitly skipped")
 	}
@@ -334,6 +444,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		preBuildCommands = append(preBuildCommands, commands.RunWithDefaults(cmd))
 	}
 
+	spanBuildExec := tracer.StartSpan("rootfs-build-exec", opentracing.ChildOf(spanRemoteConnect.Context()))
+
 	if buildErr := buildContext.
 		WithLogger(vmmLogger.Named("builder")).
 		WithServiceInstaller(commandConfig.ServiceFileInstaller).
@@ -343,17 +455,29 @@ func run(cobraCommand *cobra.Command, _ []string) {
 		Build(remoteClient); err != nil {
 		startedMachine.Stop(vmmCtx, remoteClient)
 		vmmLogger.Error("Failed boostrapping remote via SSH", "reason", buildErr)
-		return
+		spanBuildExec.SetBaggageItem("error", buildErr.Error())
+		spanBuildExec.Finish()
+		return 1
 	}
+
+	spanBuildExec.Finish()
+
+	spanStop := tracer.StartSpan("rootfs-vmm-stop", opentracing.ChildOf(spanBuildExec.Context()))
 
 	startedMachine.StopAndWait(vmmCtx, remoteClient)
 
+	spanStop.Finish()
+
 	vmmLogger.Info("Machine is stopped. Persisting the file system...")
+
+	spanPersist := tracer.StartSpan("rootfs-persist", opentracing.ChildOf(spanStop.Context()))
 
 	ok, org, name, version := utils.TagDecompose(commandConfig.Tag)
 	if !ok {
 		vmmLogger.Error("Tag could not be decomposed", "tag", commandConfig.Tag)
-		return
+		spanPersist.SetBaggageItem("error", "--tag could not be decomposed")
+		spanPersist.Finish()
+		return 1
 	}
 
 	fsFileName := filepath.Base(machineConfig.RootfsOverride())
@@ -386,9 +510,15 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 	if storeErr != nil {
 		vmmLogger.Error("failed storing built rootfs", "reason", storeErr)
-		return
+		spanPersist.SetBaggageItem("error", storeErr.Error())
+		spanPersist.Finish()
+		return 1
 	}
 
+	spanPersist.Finish()
+
 	vmmLogger.Info("Build completed successfully. Rootfs tagged.", "output", storeResult)
+
+	return 0
 
 }

@@ -139,7 +139,7 @@ func processCommand() int {
 
 	spanCacheCreate.Finish()
 
-	spanResolveKernel := tracer.StartSpan("resolve-kernel", opentracing.ChildOf(spanCacheCreate.Context()))
+	spanResolveKernel := tracer.StartSpan("run-resolve-kernel", opentracing.ChildOf(spanCacheCreate.Context()))
 
 	// resolve kernel:
 	resolvedKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
@@ -152,7 +152,7 @@ func processCommand() int {
 
 	spanResolveKernel.Finish()
 
-	spanResolveRootfs := tracer.StartSpan("resolve-rootfs", opentracing.ChildOf(spanResolveKernel.Context()))
+	spanResolveRootfs := tracer.StartSpan("run-resolve-rootfs", opentracing.ChildOf(spanResolveKernel.Context()))
 
 	// resolve rootfs:
 	from := commands.From{BaseImage: commandConfig.From}
@@ -169,7 +169,7 @@ func processCommand() int {
 
 	spanResolveRootfs.Finish()
 
-	spanRootfsMetadata := tracer.StartSpan("rootfs-metadata", opentracing.ChildOf(spanResolveRootfs.Context()))
+	spanRootfsMetadata := tracer.StartSpan("run-rootfs-metadata", opentracing.ChildOf(spanResolveRootfs.Context()))
 
 	// the metadata here must be MDRootfs:
 	mdRootfs, unwrapErr := metadata.MDRootfsFromInterface(resolvedRootfs.Metadata().(map[string]interface{}))
@@ -180,7 +180,7 @@ func processCommand() int {
 
 	spanRootfsMetadata.Finish()
 
-	spanRootfsCopy := tracer.StartSpan("rootfs-copy", opentracing.ChildOf(spanRootfsMetadata.Context()))
+	spanRootfsCopy := tracer.StartSpan("run-rootfs-copy", opentracing.ChildOf(spanRootfsMetadata.Context()))
 
 	// we do need to copy the rootfs file to a temp directory
 	// because the jailer directory indeed links to the target rootfs
@@ -277,7 +277,7 @@ func processCommand() int {
 			NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 	})
 
-	spanVMMCreate := tracer.StartSpan("vmm-create", opentracing.ChildOf(spanRootfsCopy.Context()))
+	spanVMMCreate := tracer.StartSpan("run-vmm-create", opentracing.ChildOf(spanRootfsCopy.Context()))
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
 		WithHandlersAdapter(vmmStrategy).
@@ -290,7 +290,7 @@ func processCommand() int {
 
 	spanVMMCreate.Finish()
 
-	spanVMMStart := tracer.StartSpan("vmm-start", opentracing.ChildOf(spanVMMCreate.Context()))
+	spanVMMStart := tracer.StartSpan("run-vmm-start", opentracing.ChildOf(spanVMMCreate.Context()))
 
 	startedMachine, runErr := vmmProvider.Start(vmmCtx)
 	if runErr != nil {
@@ -310,7 +310,7 @@ func processCommand() int {
 	vmmLogger = vmmLogger.With("ip-address", runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
 	spanRun.SetTag("ip", runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
 
-	spanVMMStarted := tracer.StartSpan("vmm-started", opentracing.ChildOf(spanVMMStart.Context()))
+	spanVMMStarted := tracer.StartSpan("run-vmm-started", opentracing.ChildOf(spanVMMStart.Context()))
 
 	if err := vmm.WriteMetadataToFile(runMetadata); err != nil {
 		vmmLogger.Error("failed writing machine metadata to file", "reason", err, "metadata", runMetadata)
@@ -332,10 +332,14 @@ func processCommand() int {
 
 	chanStopStatus := installSignalHandlers(context.Background(), vmmLogger, startedMachine)
 
+	spanVMMStop := tracer.StartSpan("run-vmm-stop", opentracing.ChildOf(spanVMMStarted.Context()))
+
 	startedMachine.Wait(context.Background())
 	startedMachine.Cleanup(chanStopStatus)
 
 	vmmLogger.Info("machine is stopped", "gracefully", <-chanStopStatus)
+
+	spanVMMStop.Finish()
 
 	return 0
 

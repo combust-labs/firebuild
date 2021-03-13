@@ -94,9 +94,8 @@ func processCommand() int {
 
 	if commandConfig.Tag != "" {
 		if !utils.IsValidTag(commandConfig.Tag) {
-			err := fmt.Errorf("--tag value is invalid: '%s'", commandConfig.Tag)
 			rootLogger.Error("--tag value is invalid", "tag", commandConfig.Tag)
-			spanBuild.SetBaggageItem("error", err.Error())
+			spanBuild.SetBaggageItem("error", fmt.Errorf("--tag value is invalid: '%s'", commandConfig.Tag).Error())
 			return 1
 		}
 	}
