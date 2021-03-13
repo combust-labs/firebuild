@@ -129,40 +129,48 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 				logger:        logger,
 			}
 
-			numOps := 6
-			chanErrs := make(chan error, numOps)
-			receivedErrs := []error{}
+			ops := []func() error{
+				func() error {
+					span := config.Tracer.StartSpan("strategy-pci-inject-env", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+					defer span.Finish()
+					return impl.injectEnvironment()
+				},
+				func() error {
+					span := config.Tracer.StartSpan("strategy-pci-inject-hostname", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+					defer span.Finish()
+					return impl.injectHostname()
+				},
+				func() error {
+					span := config.Tracer.StartSpan("strategy-pci-inject-hosts", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+					defer span.Finish()
+					return impl.injectHosts(cniIface)
+				},
+				func() error {
+					span := config.Tracer.StartSpan("strategy-pci-inject-metadata", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+					defer span.Finish()
+					return impl.injectMetadata()
+				},
+				func() error {
+					span := config.Tracer.StartSpan("strategy-pci-inject-netinfo", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+					defer span.Finish()
+					return impl.injectNetInfo(cniIface)
+				},
+				func() error {
+					span := config.Tracer.StartSpan("strategy-pci-inject-sshkeys", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+					defer span.Finish()
+					return impl.injectSSHKeys()
+				},
+			}
 
-			go func() {
-				span := config.Tracer.StartSpan("strategy-pci-inject-env", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
-				defer span.Finish()
-				chanErrs <- impl.injectEnvironment()
-			}()
-			go func() {
-				span := config.Tracer.StartSpan("strategy-pci-inject-hostname", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
-				defer span.Finish()
-				chanErrs <- impl.injectHostname()
-			}()
-			go func() {
-				span := config.Tracer.StartSpan("strategy-pci-inject-hosts", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
-				defer span.Finish()
-				chanErrs <- impl.injectHosts(cniIface)
-			}()
-			go func() {
-				span := config.Tracer.StartSpan("strategy-pci-inject-metadata", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
-				defer span.Finish()
-				chanErrs <- impl.injectMetadata()
-			}()
-			go func() {
-				span := config.Tracer.StartSpan("strategy-pci-inject-netinfo", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
-				defer span.Finish()
-				chanErrs <- impl.injectNetInfo(cniIface)
-			}()
-			go func() {
-				span := config.Tracer.StartSpan("strategy-pci-inject-sshkeys", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
-				defer span.Finish()
-				chanErrs <- impl.injectSSHKeys()
-			}()
+			chanErrs := make(chan error, len(ops))
+			receivedErrs := []error{}
+			numOps := len(ops)
+
+			for _, op := range ops {
+				go func(f func() error) {
+					chanErrs <- f()
+				}(op)
+			}
 
 			for {
 				receivedErrs = append(receivedErrs, <-chanErrs)
