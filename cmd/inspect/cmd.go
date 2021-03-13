@@ -83,11 +83,13 @@ func processCommand() int {
 	vmmMetadata, hasMetadata, metadataErr := vmm.FetchMetadataIfExists(filepath.Join(runCache.RunCache, commandConfig.VMMID))
 	if metadataErr != nil {
 		rootLogger.Error("failed loading metadata", "reason", metadataErr, "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
+		spanFetchMetadata.SetBaggageItem("error", metadataErr.Error())
 		spanFetchMetadata.Finish()
 		return 1
 	}
 	if !hasMetadata {
 		rootLogger.Error("run cache directory did not contain the VMM metadata", "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
+		spanFetchMetadata.SetBaggageItem("error", "no-metadata")
 		spanFetchMetadata.Finish()
 		return 1
 	}
@@ -99,6 +101,7 @@ func processCommand() int {
 	bytes, jsonErr := json.MarshalIndent(vmmMetadata, "", "  ")
 	if jsonErr != nil {
 		rootLogger.Error("failed serializing VMM metadata to JSON", "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache, "reason", jsonErr)
+		spanFetchMetadata.SetBaggageItem("error", jsonErr.Error())
 		spanMarshalMetadata.Finish()
 		return 1
 	}
