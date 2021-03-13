@@ -26,7 +26,7 @@ var (
 	commandConfig = configs.NewInspectCommandConfig()
 	logConfig     = configs.NewLogginConfig()
 	runCache      = configs.NewRunCacheConfig()
-	tracingConfig = configs.NewTracingConfig("vmm-inspect")
+	tracingConfig = configs.NewTracingConfig("firebuild-vmm-inspect")
 )
 
 func initFlags() {
@@ -87,9 +87,11 @@ func processCommand() int {
 		spanFetchMetadata.Finish()
 		return 1
 	}
+
+	spanFetchMetadata.SetTag("has-metadata", hasMetadata)
+
 	if !hasMetadata {
 		rootLogger.Error("run cache directory did not contain the VMM metadata", "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
-		spanFetchMetadata.SetBaggageItem("error", "no-metadata")
 		spanFetchMetadata.Finish()
 		return 1
 	}

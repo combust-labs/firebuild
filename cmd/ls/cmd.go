@@ -26,7 +26,7 @@ var Command = &cobra.Command{
 var (
 	logConfig     = configs.NewLogginConfig()
 	runCache      = configs.NewRunCacheConfig()
-	tracingConfig = configs.NewTracingConfig("vmm-ls")
+	tracingConfig = configs.NewTracingConfig("firebuild-vmm-ls")
 )
 
 func initFlags() {

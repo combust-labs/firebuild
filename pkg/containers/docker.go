@@ -16,7 +16,9 @@ import (
 	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/combust-labs/firebuild/pkg/build/stage"
+	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/hashicorp/go-hclog"
+	"github.com/opentracing/opentracing-go"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -73,20 +75,13 @@ func FindImageIDByTag(ctx context.Context, client *docker.Client, requiredTag st
 // contains the contents of the base OS Docker image.
 // The contents are copied via docker exec commands.
 // Once the file system is exported, the function stops the container and removes it.
-func ImageBaseOSExport(ctx context.Context, client *docker.Client, logger hclog.Logger, path, tagName string) error {
+func ImageBaseOSExport(ctx context.Context, client *docker.Client, logger hclog.Logger, path, tagName string,
+	tracer opentracing.Tracer, spanContext opentracing.SpanContext) error {
 
 	opLogger := logger.With("tag-name", tagName)
 
-	cleanupFuncs := []func(){}
-	prependCleanupFunc := func(f func()) {
-		cleanupFuncs = append([]func(){f}, cleanupFuncs...)
-	}
-
-	defer func() {
-		for _, f := range cleanupFuncs {
-			f()
-		}
-	}()
+	cleanup := utils.NewDefers()
+	defer cleanup.CallAll()
 
 	containerConfig := &container.Config{
 		OpenStdin: true,
@@ -121,8 +116,11 @@ func ImageBaseOSExport(ctx context.Context, client *docker.Client, logger hclog.
 		return startErr
 	}
 
-	prependCleanupFunc(func() {
+	cleanup.Add(func() {
+		span := tracer.StartSpan("docker-remove-container", opentracing.ChildOf(spanContext))
+		span.SetTag("container-id", containerCreateResponse.ID)
 		removeContainer(context.Background(), client, logger, containerCreateResponse.ID)
+		span.Finish()
 	})
 
 	opLogger = opLogger.With("container-id", containerCreateResponse.ID)
@@ -133,8 +131,11 @@ func ImageBaseOSExport(ctx context.Context, client *docker.Client, logger hclog.
 		return err
 	}
 
-	prependCleanupFunc(func() {
+	cleanup.Add(func() {
+		span := tracer.StartSpan("docker-stop-container", opentracing.ChildOf(spanContext))
+		span.SetTag("container-id", containerCreateResponse.ID)
 		stopContainer(context.Background(), client, logger, containerCreateResponse.ID)
+		span.Finish()
 	})
 
 	bareList := strings.Join(ImageBaseOSExportNoCopyDirs, " ")
