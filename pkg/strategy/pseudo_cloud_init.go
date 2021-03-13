@@ -13,7 +13,10 @@ import (
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
+
+	"github.com/hashicorp/go-multierror"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -44,6 +47,9 @@ type PseudoCloudInitHandlerConfig struct {
 	Environment map[string]string
 	Hostname    string
 	PublicKeys  []ssh.PublicKey
+
+	Tracer      opentracing.Tracer
+	SpanContext opentracing.SpanContext
 }
 
 // NewPseudoCloudInitHandler returns a firecracker handler which can be used to inject state into
@@ -65,6 +71,9 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 
 			logger.Debug("checking the jailed rootfs file", "path", config.RootfsFileName, "hostname", config.Hostname)
 
+			spanPseudoCloudInit := config.Tracer.StartSpan("strategy-pci", opentracing.ChildOf(config.SpanContext))
+			defer spanPseudoCloudInit.Finish()
+
 			jailedRootfsFile := filepath.Join(config.Chroot, "root", config.RootfsFileName)
 
 			if _, statErr := utils.CheckIfExistsAndIsRegular(jailedRootfsFile); statErr != nil {
@@ -74,10 +83,13 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 
 			logger.Debug("creating temp directory to mount jailed rootfs file")
 
+			spanPseudoCloudInitTempDir := config.Tracer.StartSpan("strategy-pci-temp-dir", opentracing.ChildOf(spanPseudoCloudInit.Context()))
+
 			// if it is, we need a temp directory where we can mount the file
 			tempDir, tempDirErr := os.MkdirTemp("", "")
 			if tempDirErr != nil {
 				logger.Error("failed creating temp dir for jailed rootfs mount", "reason", tempDirErr)
+				spanPseudoCloudInitTempDir.Finish()
 				return fmt.Errorf("failed creating temp dir for jailed rootfs mount: %+v", tempDirErr)
 			}
 
@@ -88,11 +100,16 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 				}
 			}()
 
+			spanPseudoCloudInitTempDir.Finish()
+
 			logger.Debug("mouting jailed rootfs file")
+
+			spanPseudoCloudInitMountDir := config.Tracer.StartSpan("strategy-pci-mount", opentracing.ChildOf(spanPseudoCloudInitTempDir.Context()))
 
 			// now we can mount the rootfs file:
 			if mountErr := utils.Mount(jailedRootfsFile, tempDir); mountErr != nil {
 				logger.Error("failed mounting jailed rootfs under temp directory", "reason", mountErr)
+				spanPseudoCloudInitMountDir.Finish()
 				return mountErr
 			}
 
@@ -104,33 +121,66 @@ func NewPseudoCloudInitHandler(logger hclog.Logger, config *PseudoCloudInitHandl
 				}
 			}()
 
+			spanPseudoCloudInitMountDir.Finish()
+
 			impl := &pseudoCloudInitHandlerImplementation{
 				mountedFsRoot: tempDir,
 				config:        config,
 				logger:        logger,
 			}
 
-			if err := impl.injectEnvironment(); err != nil {
-				return err
+			numOps := 6
+			chanErrs := make(chan error, numOps)
+			receivedErrs := []error{}
+
+			go func() {
+				span := config.Tracer.StartSpan("strategy-pci-inject-env", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+				defer span.Finish()
+				chanErrs <- impl.injectEnvironment()
+			}()
+			go func() {
+				span := config.Tracer.StartSpan("strategy-pci-inject-hostname", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+				defer span.Finish()
+				chanErrs <- impl.injectHostname()
+			}()
+			go func() {
+				span := config.Tracer.StartSpan("strategy-pci-inject-hosts", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+				defer span.Finish()
+				chanErrs <- impl.injectHosts(cniIface)
+			}()
+			go func() {
+				span := config.Tracer.StartSpan("strategy-pci-inject-metadata", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+				defer span.Finish()
+				chanErrs <- impl.injectMetadata()
+			}()
+			go func() {
+				span := config.Tracer.StartSpan("strategy-pci-inject-netinfo", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+				defer span.Finish()
+				chanErrs <- impl.injectNetInfo(cniIface)
+			}()
+			go func() {
+				span := config.Tracer.StartSpan("strategy-pci-inject-sshkeys", opentracing.ChildOf(spanPseudoCloudInitMountDir.Context()))
+				defer span.Finish()
+				chanErrs <- impl.injectSSHKeys()
+			}()
+
+			for {
+				receivedErrs = append(receivedErrs, <-chanErrs)
+				if len(receivedErrs) == numOps {
+					break
+				}
 			}
-			if err := impl.injectHostname(); err != nil {
-				return err
-			}
-			if err := impl.injectHosts(cniIface); err != nil {
-				return err
-			}
-			if err := impl.injectMetadata(); err != nil {
-				return err
-			}
-			if err := impl.injectNetInfo(cniIface); err != nil {
-				return err
-			}
-			if err := impl.injectSSHKeys(); err != nil {
-				return err
+
+			var resultErr error
+
+			for _, err := range receivedErrs {
+				if err != nil {
+					resultErr = multierror.Append(resultErr, err)
+				}
 			}
 
 			// all okay, keys written
-			return nil
+			return resultErr
 		},
 	}
 }

@@ -196,13 +196,9 @@ func processCommand() int {
 
 	spanRootfsCopy.Finish()
 
-	spanVeth := tracer.StartSpan("veth", opentracing.ChildOf(spanRootfsCopy.Context()))
-
 	// get the veth interface name and write to also to a file:
 	vethIfaceName := naming.GetRandomVethName()
 	spanRun.SetTag("ifname", vethIfaceName)
-
-	spanVeth.Finish()
 
 	// don't use resolvedRootfs.HostPath() below this point:
 	machineConfig.
@@ -224,8 +220,6 @@ func processCommand() int {
 		}
 	})
 
-	spanRunMetadata := tracer.StartSpan("run-metadata", opentracing.ChildOf(spanVeth.Context()))
-
 	// gather the running vmm metadata:
 	runMetadata := &metadata.MDRun{
 		Configs: metadata.MDRunConfigs{
@@ -239,8 +233,6 @@ func processCommand() int {
 		RunCache:     cacheDirectory,
 		Type:         metadata.MetadataTypeRun,
 	}
-
-	spanRunMetadata.Finish()
 
 	vmmStrategy := configs.DefaultFirectackerStrategy(machineConfig)
 
@@ -268,6 +260,9 @@ func processCommand() int {
 			Environment: vmmEnvironment,
 			Hostname:    commandConfig.Hostname,
 			PublicKeys:  strategyPublicKeys,
+
+			SpanContext: spanRootfsCopy.Context(),
+			Tracer:      tracer,
 		}
 		vmmStrategy = vmmStrategy.AddRequirements(func() *arbitrary.HandlerPlacement {
 			return arbitrary.NewHandlerPlacement(strategy.
@@ -282,7 +277,7 @@ func processCommand() int {
 			NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 	})
 
-	spanVMMCreate := tracer.StartSpan("vmm-create", opentracing.ChildOf(spanRunMetadata.Context()))
+	spanVMMCreate := tracer.StartSpan("vmm-create", opentracing.ChildOf(spanRootfsCopy.Context()))
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
 		WithHandlersAdapter(vmmStrategy).
