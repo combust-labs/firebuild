@@ -3,7 +3,6 @@ package rootfs
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -49,6 +48,7 @@ var (
 	logConfig        = configs.NewLogginConfig()
 	machineConfig    = configs.NewMachineConfig()
 	profilesConfig   = configs.NewProfileCommandConfig()
+	runCache         = configs.NewRunCacheConfig()
 	tracingConfig    = configs.NewTracingConfig("firebuild-rootfs")
 	rsaKeySize       = 4096
 
@@ -63,6 +63,7 @@ func initFlags() {
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
 	Command.Flags().AddFlagSet(profilesConfig.FlagSet())
+	Command.Flags().AddFlagSet(runCache.FlagSet())
 	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 	// Storage provider flags:
 	resolver.AddStorageFlags(Command.Flags())
@@ -89,7 +90,7 @@ func processCommand() int {
 			rootLogger.Error("failed resolving profile", "reason", err, "profile", profilesConfig.Profile)
 			return 1
 		}
-		if err := profile.UpdateConfigs(jailingFcConfig, tracingConfig); err != nil {
+		if err := profile.UpdateConfigs(jailingFcConfig, runCache, tracingConfig); err != nil {
 			rootLogger.Error("error updating configuration from profile", "reason", err)
 			return 1
 		}
@@ -148,18 +149,19 @@ func processCommand() int {
 
 	spanTempDir := tracer.StartSpan("rootfs-temp-dir", opentracing.ChildOf(spanBuild.Context()))
 
-	tempDirectory, err := ioutil.TempDir("", "")
-	if err != nil {
-		rootLogger.Error("Failed creating temporary build directory", "reason", err)
+	// create cache directory:
+	cacheDirectory := filepath.Join(runCache.LocationBuilds(), jailingFcConfig.VMMID())
+	if err := os.MkdirAll(cacheDirectory, 0755); err != nil {
+		rootLogger.Error("failed creating build VMM cache directory", "reason", err)
 		spanTempDir.SetBaggageItem("error", err.Error())
 		spanTempDir.Finish()
 		return 1
 	}
 
 	cleanup.Add(func() {
-		span := tracer.StartSpan("rootfs-temp-dir", opentracing.ChildOf(spanTempDir.Context()))
+		span := tracer.StartSpan("rootfs-temp-cleanup", opentracing.ChildOf(spanTempDir.Context()))
 		rootLogger.Info("cleaning up temp build directory")
-		if err := os.RemoveAll(tempDirectory); err != nil {
+		if err := os.RemoveAll(cacheDirectory); err != nil {
 			rootLogger.Info("temp build directory removal status", "error", err)
 			span.SetBaggageItem("error", err.Error())
 		}
@@ -191,7 +193,7 @@ func processCommand() int {
 
 	spanParseDockerfile := tracer.StartSpan("rootfs-parse-dockerfile", opentracing.ChildOf(spanGenerateKeys.Context()))
 
-	readResults, err := reader.ReadFromString(commandConfig.Dockerfile, tempDirectory)
+	readResults, err := reader.ReadFromString(commandConfig.Dockerfile, cacheDirectory)
 	if err != nil {
 		rootLogger.Error("failed parsing Dockerfile", "reason", err)
 		spanParseDockerfile.SetBaggageItem("error", err.Error())
@@ -265,7 +267,7 @@ func processCommand() int {
 					return 1
 				}
 				spanDependencyBuild := tracer.StartSpan("rootfs-build-dependency", opentracing.ChildOf(spanBuildContext.Context()))
-				dependencyBuilder := build.NewDefaultDependencyBuild(dependencyStage, tempDirectory, filepath.Join(tempDirectory, "sources"))
+				dependencyBuilder := build.NewDefaultDependencyBuild(dependencyStage, cacheDirectory, filepath.Join(cacheDirectory, "sources"))
 				resolvedResources, buildError := dependencyBuilder.Build(requiredCopies)
 				if buildError != nil {
 					rootLogger.Error("failed building stage dependency", "stage", stage.Name(), "dependency", dependency, "reason", buildError)
@@ -297,6 +299,8 @@ func processCommand() int {
 		return 1
 	}
 
+	rootLogger.Info("kernel resolved", "host-path", resolvedKernel.HostPath())
+
 	spanResolveKernel.Finish()
 
 	spanResolveRootfs := tracer.StartSpan("rootfs-resolve-rootfs", opentracing.ChildOf(spanResolveKernel.Context()))
@@ -314,6 +318,8 @@ func processCommand() int {
 		return 1
 	}
 
+	rootLogger.Info("rootfs resolved", "host-path", resolvedRootfs.HostPath())
+
 	spanResolveRootfs.Finish()
 
 	spanRootfsCopy := tracer.StartSpan("rootfs-copy", opentracing.ChildOf(spanResolveRootfs.Context()))
@@ -321,7 +327,7 @@ func processCommand() int {
 	// we do need to copy the rootfs file to a temp directory
 	// because the jailer directory indeed links to the target rootfs
 	// and changes are persisted
-	buildRootfs := filepath.Join(tempDirectory, naming.RootfsFileName)
+	buildRootfs := filepath.Join(cacheDirectory, naming.RootfsFileName)
 	if err := utils.CopyFile(resolvedRootfs.HostPath(), buildRootfs, utils.RootFSCopyBufferSize); err != nil {
 		rootLogger.Error("failed copying requested rootfs to temp build location",
 			"source", resolvedRootfs.HostPath(),
@@ -345,16 +351,17 @@ func processCommand() int {
 
 	vmmLogger.Info("buildiing VMM",
 		"dockerfile", commandConfig.Dockerfile,
+		"kernel-path", resolvedKernel.HostPath(),
 		"source-rootfs", machineConfig.RootfsOverride(),
 		"jail", jailingFcConfig.JailerChrootDirectory())
 
 	cleanup.Add(func() {
 		span := tracer.StartSpan("rootfs-cleanup-temp", opentracing.ChildOf(spanBuild.Context()))
 		vmmLogger.Info("cleaning up jail directory")
-		if err := os.RemoveAll(jailingFcConfig.JailerChrootDirectory()); err != nil {
-			vmmLogger.Info("jail directory removal status", "error", err)
-			span.SetBaggageItem("error", err.Error())
-		}
+		//if err := os.RemoveAll(jailingFcConfig.JailerChrootDirectory()); err != nil {
+		//	vmmLogger.Info("jail directory removal status", "error", err)
+		//	span.SetBaggageItem("error", err.Error())
+		//}
 		span.Finish()
 	})
 

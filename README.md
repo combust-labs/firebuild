@@ -82,9 +82,6 @@ TODO: explain why is the base operating system rootfs required.
 sudo /usr/local/go/bin/go run ./main.go rootfs \
     --profile=standard \
     --dockerfile=git+https://github.com/docker-library/postgres.git:/13/Dockerfile \
-    --storage-provider=directory \
-    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --storage-provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --machine-cni-network-name=machine-builds \
     --machine-ssh-user=debian \
     --machine-vmlinux-id=vmlinux-v5.8 \

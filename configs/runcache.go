@@ -2,6 +2,7 @@ package configs
 
 import (
 	"fmt"
+	"path/filepath"
 
 	profileModel "github.com/combust-labs/firebuild/pkg/profiles/model"
 	"github.com/spf13/pflag"
@@ -43,4 +44,12 @@ func (c *RunCacheConfig) Validate() error {
 		return fmt.Errorf("run cache cannot be empty or /")
 	}
 	return nil
+}
+
+func (c *RunCacheConfig) LocationBuilds() string {
+	return filepath.Join(c.RunCache, "builds")
+}
+
+func (c *RunCacheConfig) LocationRuns() string {
+	return filepath.Join(c.RunCache, "runs")
 }

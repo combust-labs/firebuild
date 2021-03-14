@@ -65,7 +65,7 @@ func processCommand() int {
 		}
 	}
 
-	rootLogger = rootLogger.With("run-cache", runCache.RunCache)
+	rootLogger = rootLogger.With("run-cache", runCache.LocationRuns())
 
 	// tracing:
 
@@ -93,7 +93,7 @@ func processCommand() int {
 	spanPurge := tracer.StartSpan("purge")
 	defer spanPurge.Finish()
 
-	fileInfos, readDirErr := ioutil.ReadDir(runCache.RunCache)
+	fileInfos, readDirErr := ioutil.ReadDir(runCache.LocationRuns())
 	if readDirErr != nil {
 		rootLogger.Error("error listing run cache directory", "reason", readDirErr)
 		spanPurge.SetBaggageItem("error", readDirErr.Error())
@@ -108,7 +108,7 @@ func processCommand() int {
 		spanMetadata := tracer.StartSpan("vmm-fetch-metadata", opentracing.ChildOf(spanPurge.Context()))
 		spanMetadata.SetTag("fs-entry", fsentry)
 
-		vmmMetadata, hasMetadata, err := vmm.FetchMetadataIfExists(filepath.Join(runCache.RunCache, fsentry))
+		vmmMetadata, hasMetadata, err := vmm.FetchMetadataIfExists(filepath.Join(runCache.LocationRuns(), fsentry))
 		if err != nil {
 			rootLogger.Error("metadata error for cache entry, skipping", "fs-entry", fsentry, "reason", err)
 			spanMetadata.SetBaggageItem("error", err.Error())
@@ -176,7 +176,7 @@ func processCommand() int {
 			spanPurgeCache.SetTag("fs-entry", fsentry)
 
 			// have to clean up the cache
-			cacheDirectory := filepath.Join(runCache.RunCache, vmmMetadata.VMMID)
+			cacheDirectory := filepath.Join(runCache.LocationRuns(), vmmMetadata.VMMID)
 			if err := os.RemoveAll(cacheDirectory); err != nil {
 				spanPurgeCache.SetBaggageItem("cache-purge-error", err.Error())
 				vmmLogger.Error("failed removing cache directroy", "reason", err, "path", cacheDirectory)

@@ -15,7 +15,7 @@ sudo /usr/local/go/bin/go run ./main.go profile-create \
 	--binary-firecracker=$(readlink /usr/bin/firecracker) \
 	--binary-jailer=$(readlink /usr/bin/jailer) \
 	--chroot-base=/srv/jailer \
-	--run-cache=/var/lib/firebuild \
+	--run-cache=/var/lib/firebuild/runs \
 	--storage-provider=directory \
 	--storage-provider-property-string="rootfs-storage-root=/firecracker/rootfs" \
 	--storage-provider-property-string="kernel-storage-root=/firecracker/vmlinux" \

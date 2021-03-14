@@ -95,9 +95,9 @@ func processCommand() int {
 
 	spanFetchMetadata := tracer.StartSpan("fetch-metadata", opentracing.ChildOf(spanInspect.Context()))
 
-	vmmMetadata, hasMetadata, metadataErr := vmm.FetchMetadataIfExists(filepath.Join(runCache.RunCache, commandConfig.VMMID))
+	vmmMetadata, hasMetadata, metadataErr := vmm.FetchMetadataIfExists(filepath.Join(runCache.LocationRuns(), commandConfig.VMMID))
 	if metadataErr != nil {
-		rootLogger.Error("failed loading metadata", "reason", metadataErr, "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
+		rootLogger.Error("failed loading metadata", "reason", metadataErr, "vmm-id", commandConfig.VMMID, "run-cache", runCache.LocationRuns())
 		spanFetchMetadata.SetBaggageItem("error", metadataErr.Error())
 		spanFetchMetadata.Finish()
 		return 1
@@ -106,7 +106,7 @@ func processCommand() int {
 	spanFetchMetadata.SetTag("has-metadata", hasMetadata)
 
 	if !hasMetadata {
-		rootLogger.Error("run cache directory did not contain the VMM metadata", "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
+		rootLogger.Error("run cache directory did not contain the VMM metadata", "vmm-id", commandConfig.VMMID, "run-cache", runCache.LocationRuns())
 		spanFetchMetadata.Finish()
 		return 1
 	}
@@ -117,7 +117,7 @@ func processCommand() int {
 
 	bytes, jsonErr := json.MarshalIndent(vmmMetadata, "", "  ")
 	if jsonErr != nil {
-		rootLogger.Error("failed serializing VMM metadata to JSON", "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache, "reason", jsonErr)
+		rootLogger.Error("failed serializing VMM metadata to JSON", "vmm-id", commandConfig.VMMID, "run-cache", runCache.LocationRuns(), "reason", jsonErr)
 		spanFetchMetadata.SetBaggageItem("error", jsonErr.Error())
 		spanMarshalMetadata.Finish()
 		return 1

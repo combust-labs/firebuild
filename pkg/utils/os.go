@@ -98,25 +98,36 @@ func Mount(file, dir string) error {
 	return nil
 }
 
-// MoveFile moves file from one location to another
-// and create intermediate target directories.
+// MoveFile moves file from source to destination.
+// os.Rename does not allow moving between drives
+// hence we have to rewrite the file.
+// Intermediate target directories will be created.
 func MoveFile(source, target string) error {
 
-	sourceStat, err := os.Stat(source)
-	if err != nil {
-		return err
-	}
-	if !sourceStat.Mode().IsRegular() {
-		return fmt.Errorf("source is not regular file")
-	}
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
 
-	if err := os.Rename(source, target); err != nil {
-		return fmt.Errorf("move failed, reason: %+v", err)
+	inputFile, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("Couldn't open source file: %s", err)
 	}
-
+	outputFile, err := os.Create(target)
+	if err != nil {
+		inputFile.Close()
+		return fmt.Errorf("Couldn't open dest file: %s", err)
+	}
+	defer outputFile.Close()
+	_, err = io.Copy(outputFile, inputFile)
+	inputFile.Close()
+	if err != nil {
+		return fmt.Errorf("Writing to output file failed: %s", err)
+	}
+	// The copy was successful, so now delete the original file
+	err = os.Remove(source)
+	if err != nil {
+		return fmt.Errorf("Failed removing original file: %s", err)
+	}
 	return nil
 }
 
