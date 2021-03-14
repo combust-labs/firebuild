@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/reader"
@@ -19,6 +18,7 @@ import (
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/storage"
+	"github.com/combust-labs/firebuild/pkg/storage/resolver"
 	"github.com/combust-labs/firebuild/pkg/tracing"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/opentracing/opentracing-go"
@@ -44,7 +44,7 @@ func initFlags() {
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 	// Storage provider flags:
-	cmd.AddStorageFlags(Command.Flags())
+	resolver.AddStorageFlags(Command.Flags())
 }
 
 func init() {
@@ -100,7 +100,7 @@ func processCommand() int {
 		}
 	}
 
-	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
+	storageImpl, resolveErr := resolver.GetStorageImpl(rootLogger)
 	if resolveErr != nil {
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
 		spanBuild.SetBaggageItem("error", resolveErr.Error())

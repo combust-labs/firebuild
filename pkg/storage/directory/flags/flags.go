@@ -18,8 +18,8 @@ func New() storage.FlagProvider {
 
 func (fp *flags) GetFlags() *pflag.FlagSet {
 	set := &pflag.FlagSet{}
-	set.StringVar(&fp.KernelStorageRoot, "storage.provider.directory.kernel-storage-root", "", "Full path to the root directory of the kernel storage")
-	set.StringVar(&fp.RootfsStorageRoot, "storage.provider.directory.rootfs-storage-root", "", "Full path to the root directory of the rootfs storage")
+	set.StringVar(&fp.KernelStorageRoot, "storage-provider.directory.kernel-storage-root", "", "Full path to the root directory of the kernel storage")
+	set.StringVar(&fp.RootfsStorageRoot, "storage-provider.directory.rootfs-storage-root", "", "Full path to the root directory of the rootfs storage")
 	return set
 }
 

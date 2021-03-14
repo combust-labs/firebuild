@@ -43,8 +43,8 @@ Build a base operating system root file system. For example, Debian Buster slim:
 ```sh
 sudo /usr/local/go/bin/go run ./main.go baseos \
     --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile \
-    --storage.provider=directory \
-    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage-provider=directory \
+    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
     --tracing-enable
 ```
 
@@ -55,8 +55,8 @@ It's possible to tag the baseos output using the `--tag=` argument, for example:
 ```sh
 sudo /usr/local/go/bin/go run ./main.go baseos \
     --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile \
-    --storage.provider=directory \
-    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage-provider=directory \
+    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
     --tag=custom/os:latest \
     --tracing-enable
 ```
@@ -73,9 +73,9 @@ sudo /usr/local/go/bin/go run ./main.go rootfs \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
     --dockerfile=git+https://github.com/docker-library/postgres.git:/13/Dockerfile \
-    --storage.provider=directory \
-    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --storage.provider.directory.kernel-storage-root=/firecracker/vmlinux \
+    --storage-provider=directory \
+    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage-provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --machine-cni-network-name=machine-builds \
     --machine-ssh-user=debian \
     --machine-vmlinux-id=vmlinux-v5.8 \
@@ -99,9 +99,9 @@ sudo /usr/local/go/bin/go run ./main.go run \
     --binary-firecracker=$(readlink /usr/bin/firecracker) \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
-    --storage.provider=directory \
-    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --storage.provider.directory.kernel-storage-root=/firecracker/vmlinux \
+    --storage-provider=directory \
+    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage-provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --from=tests/postgres:13 \
     --machine-cni-network-name=alpine \
     --machine-ssh-user=debian \
@@ -192,9 +192,9 @@ sudo /usr/local/go/bin/go run ./main.go rootfs \
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
     --dockerfile=git+https://github.com/hashicorp/docker-consul.git:/0.X/Dockerfile#master \
-    --storage.provider=directory \
-    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --storage.provider.directory.kernel-storage-root=/firecracker/vmlinux \
+    --storage-provider=directory \
+    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage-provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --machine-cni-network-name=machine-builds \
     --machine-ssh-user=alpine \
     --machine-vmlinux-id=vmlinux-v5.8 \
@@ -275,9 +275,9 @@ Build v0.2.8 using git repository link, leave SSH access on:
     --binary-jailer=$(readlink /usr/bin/jailer) \
     --chroot-base=/srv/jailer \
     --dockerfile=git+https://github.com/grepplabs/kafka-proxy.git:/Dockerfile#v0.2.8 \
-    --storage.provider=directory \
-    --storage.provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --storage.provider.directory.kernel-storage-root=/firecracker/vmlinux \
+    --storage-provider=directory \
+    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
+    --storage-provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --machine-cni-network-name=machine-builds \
     --machine-ssh-user=alpine \
     --machine-vmlinux-id=vmlinux-v5.8 \

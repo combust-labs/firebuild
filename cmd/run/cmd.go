@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/storage"
+	"github.com/combust-labs/firebuild/pkg/storage/resolver"
 	"github.com/combust-labs/firebuild/pkg/strategy"
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
 	"github.com/combust-labs/firebuild/pkg/tracing"
@@ -54,7 +54,7 @@ func initFlags() {
 	Command.Flags().AddFlagSet(runCache.FlagSet())
 	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 	// Storage provider flags:
-	cmd.AddStorageFlags(Command.Flags())
+	resolver.AddStorageFlags(Command.Flags())
 }
 
 func init() {
@@ -97,7 +97,7 @@ func processCommand() int {
 	defer spanRun.Finish()
 
 	// storage:
-	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
+	storageImpl, resolveErr := resolver.GetStorageImpl(rootLogger)
 	if resolveErr != nil {
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
 		return 1
@@ -186,7 +186,7 @@ func processCommand() int {
 	// because the jailer directory indeed links to the target rootfs
 	// and changes are persisted
 	runRootfs := filepath.Join(cacheDirectory, naming.RootfsFileName)
-	if err := utils.CopyFile(resolvedRootfs.HostPath(), runRootfs, cmd.RootFSCopyBufferSize); err != nil {
+	if err := utils.CopyFile(resolvedRootfs.HostPath(), runRootfs, utils.RootFSCopyBufferSize); err != nil {
 		rootLogger.Error("failed copying requested rootfs to temp build location",
 			"source", resolvedRootfs.HostPath(),
 			"target", runRootfs,

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/build"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
@@ -20,6 +19,7 @@ import (
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/combust-labs/firebuild/pkg/storage"
+	"github.com/combust-labs/firebuild/pkg/storage/resolver"
 	"github.com/combust-labs/firebuild/pkg/tracing"
 	"github.com/opentracing/opentracing-go"
 
@@ -60,7 +60,7 @@ func initFlags() {
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
 	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 	// Storage provider flags:
-	cmd.AddStorageFlags(Command.Flags())
+	resolver.AddStorageFlags(Command.Flags())
 }
 
 func init() {
@@ -95,7 +95,7 @@ func processCommand() int {
 		spanBuild.Finish()
 	})
 
-	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
+	storageImpl, resolveErr := resolver.GetStorageImpl(rootLogger)
 	if resolveErr != nil {
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
 		spanBuild.SetBaggageItem("error", resolveErr.Error())
@@ -302,7 +302,7 @@ func processCommand() int {
 	// because the jailer directory indeed links to the target rootfs
 	// and changes are persisted
 	buildRootfs := filepath.Join(tempDirectory, naming.RootfsFileName)
-	if err := utils.CopyFile(resolvedRootfs.HostPath(), buildRootfs, cmd.RootFSCopyBufferSize); err != nil {
+	if err := utils.CopyFile(resolvedRootfs.HostPath(), buildRootfs, utils.RootFSCopyBufferSize); err != nil {
 		rootLogger.Error("failed copying requested rootfs to temp build location",
 			"source", resolvedRootfs.HostPath(),
 			"target", buildRootfs,
