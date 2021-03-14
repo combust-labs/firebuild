@@ -8,20 +8,20 @@ import (
 type MachineConfig struct {
 	flagBase
 
-	MachineCNINetworkName        string `json:"machine-cni-network-name"`
-	MachineCPUTemplate           string `json:"machine-cpu-template"`
-	MachineHTEnabled             bool   `json:"machine-ht-enabled"`
-	MachineKernelArgs            string `json:"machine-kernel-args"`
-	MachineRootDrivePartUUID     string `json:"machine-root-drive-partuuid"`
-	MachineSSHEnableAgentForward bool   `json:"machine-ssh-enable-agent-forward"`
-	MachineSSHPort               int    `json:"machine-ssh-port"`
-	MachineSSHUser               string `json:"machine-ssh-user"`
-	MachineSSHAuthorizedKeysFile string `json:"machine-ssh-authorized-keys-file"`
-	MachineVMLinuxID             string `json:"machine-vmlinux"`
-	ResourcesCPU                 int64  `json:"machine-resources-cpu"`
-	ResourcesMem                 int64  `json:"machine-resources-mem"`
+	MachineCNINetworkName        string `json:"machine-cni-network-name" mapstructure:"machine-cni-network-name"`
+	MachineCPUTemplate           string `json:"machine-cpu-template" mapstructure:"machine-cpu-template"`
+	MachineHTEnabled             bool   `json:"machine-ht-enabled" mapstructure:"machine-ht-enabled"`
+	MachineKernelArgs            string `json:"machine-kernel-args" mapstructure:"machine-kernel-args"`
+	MachineRootDrivePartUUID     string `json:"machine-root-drive-partuuid" mapstructure:"machine-root-drive-partuuid"`
+	MachineSSHEnableAgentForward bool   `json:"machine-ssh-enable-agent-forward" mapstructure:"machine-ssh-enable-agent-forward"`
+	MachineSSHPort               int    `json:"machine-ssh-port" mapstructure:"machine-ssh-port"`
+	MachineSSHUser               string `json:"machine-ssh-user" mapstructure:"machine-ssh-user"`
+	MachineSSHAuthorizedKeysFile string `json:"machine-ssh-authorized-keys-file" mapstructure:"machine-ssh-authorized-keys-file"`
+	MachineVMLinuxID             string `json:"machine-vmlinux" mapstructure:"machine-vmlinux"`
+	ResourcesCPU                 int64  `json:"machine-resources-cpu" mapstructure:"machine-resources-cpu"`
+	ResourcesMem                 int64  `json:"machine-resources-mem" mapstructure:"machine-resources-mem"`
 
-	ShutdownGracefulTimeoutSeconds int
+	ShutdownGracefulTimeoutSeconds int `json:"shutdown-graceful-timeout-seconds" mapstructure:"shutdown-graceful-timeout-seconds"`
 
 	daemonize      bool
 	kernelOverride string

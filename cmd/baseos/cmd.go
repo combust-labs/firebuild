@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/combust-labs/firebuild/cmd"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/reader"
@@ -18,7 +17,9 @@ import (
 	"github.com/combust-labs/firebuild/pkg/containers"
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
+	"github.com/combust-labs/firebuild/pkg/profiles"
 	"github.com/combust-labs/firebuild/pkg/storage"
+	"github.com/combust-labs/firebuild/pkg/storage/resolver"
 	"github.com/combust-labs/firebuild/pkg/tracing"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/opentracing/opentracing-go"
@@ -34,17 +35,21 @@ var Command = &cobra.Command{
 }
 
 var (
-	commandConfig = configs.NewBaseOSCommandConfig()
-	logConfig     = configs.NewLogginConfig()
-	tracingConfig = configs.NewTracingConfig("firebuild-baseos")
+	commandConfig  = configs.NewBaseOSCommandConfig()
+	logConfig      = configs.NewLogginConfig()
+	profilesConfig = configs.NewProfileCommandConfig()
+	tracingConfig  = configs.NewTracingConfig("firebuild-baseos")
+
+	storageResolver = resolver.NewDefaultResolver()
 )
 
 func initFlags() {
 	Command.Flags().AddFlagSet(commandConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
+	Command.Flags().AddFlagSet(profilesConfig.FlagSet())
 	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 	// Storage provider flags:
-	cmd.AddStorageFlags(Command.Flags())
+	resolver.AddStorageFlags(Command.Flags())
 }
 
 func init() {
@@ -61,6 +66,21 @@ func processCommand() int {
 	defer cleanup.CallAll()
 
 	rootLogger := logConfig.NewLogger("baseos")
+
+	if profilesConfig.Profile != "" {
+		profile, err := profiles.ReadProfile(profilesConfig.Profile, profilesConfig.ProfileConfDir)
+		if err != nil {
+			rootLogger.Error("failed resolving profile", "reason", err, "profile", profilesConfig.Profile)
+			return 1
+		}
+		if err := profile.UpdateConfigs(tracingConfig); err != nil {
+			rootLogger.Error("error updating configuration from profile", "reason", err)
+			return 1
+		}
+		storageResolver.
+			WithConfigurationOverride(profile.GetMergedStorageConfig()).
+			WithTypeOverride(profile.Profile().StorageProvider)
+	}
 
 	// tracing:
 
@@ -100,7 +120,7 @@ func processCommand() int {
 		}
 	}
 
-	storageImpl, resolveErr := cmd.GetStorageImpl(rootLogger)
+	storageImpl, resolveErr := storageResolver.GetStorageImpl(rootLogger)
 	if resolveErr != nil {
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
 		spanBuild.SetBaggageItem("error", resolveErr.Error())

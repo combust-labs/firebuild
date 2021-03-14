@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	profileModel "github.com/combust-labs/firebuild/pkg/profiles/model"
 	"github.com/gofrs/uuid"
 	"github.com/spf13/pflag"
 )
@@ -14,17 +15,18 @@ import (
 type JailingFirecrackerConfig struct {
 	sync.Mutex
 	flagBase
-	ValidatingConfig `json:"-"`
+	ProfileInheriting `json:"-"`
+	ValidatingConfig  `json:"-"`
 
-	BinaryFirecracker string `json:"binary-firecracker"`
-	BinaryJailer      string `json:"binary-jailer"`
-	ChrootBase        string `json:"chroot-base"`
+	BinaryFirecracker string `json:"binary-firecracker" mapstructure:"binary-firecracker"`
+	BinaryJailer      string `json:"binary-jailer" mapstructure:"binary-jailer"`
+	ChrootBase        string `json:"chroot-base" mapstructure:"chroot-base"`
 
-	JailerGID      int `json:"jailer-gid"`
-	JailerNumeNode int `json:"jailer-numa-node"`
-	JailerUID      int `json:"jailer-uid"`
+	JailerGID      int `json:"jailer-gid" mapstructure:"jailer-gid"`
+	JailerNumeNode int `json:"jailer-numa-node" mapstructure:"jailer-numa-node"`
+	JailerUID      int `json:"jailer-uid" mapstructure:"jailer-uid"`
 
-	NetNS string `json:"netns"`
+	NetNS string `json:"netns" mapstructure:"netns"`
 
 	vmmID string
 }
@@ -59,6 +61,20 @@ func (c *JailingFirecrackerConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.NetNS, "netns", "/var/lib/netns", "Network namespace")
 	}
 	return c.flagSet
+}
+
+// UpdateFromProfile updates the configuration from a profile.
+func (c *JailingFirecrackerConfig) UpdateFromProfile(input *profileModel.Profile) error {
+	if input.BinaryFirecracker != "" {
+		c.BinaryFirecracker = input.BinaryFirecracker
+	}
+	if input.BinaryJailer != "" {
+		c.BinaryJailer = input.BinaryJailer
+	}
+	if input.ChrootBase != "" {
+		c.ChrootBase = input.ChrootBase
+	}
+	return nil
 }
 
 // Validate validates the correctness of the configuration.

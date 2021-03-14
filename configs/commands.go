@@ -125,35 +125,6 @@ func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
-// RunCacheConfig contains the run cache settings.
-type RunCacheConfig struct {
-	flagBase
-	ValidatingConfig
-
-	RunCache string
-}
-
-// NewRunCacheConfig returns new run cahce command configuration.
-func NewRunCacheConfig() *RunCacheConfig {
-	return &RunCacheConfig{}
-}
-
-// FlagSet returns an instance of the flag set for the configuration.
-func (c *RunCacheConfig) FlagSet() *pflag.FlagSet {
-	if c.initFlagSet() {
-		c.flagSet.StringVar(&c.RunCache, "run-cache", "/var/lib/firebuild", "Firebuild run cache directory")
-	}
-	return c.flagSet
-}
-
-// Validate validates the correctness of the configuration.
-func (c *RunCacheConfig) Validate() error {
-	if c.RunCache == "" || c.RunCache == "/" {
-		return fmt.Errorf("run cache cannot be empty or /")
-	}
-	return nil
-}
-
 // RunCommandConfig is the run command configuration.
 type RunCommandConfig struct {
 	flagBase

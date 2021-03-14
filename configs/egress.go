@@ -6,9 +6,9 @@ import "github.com/spf13/pflag"
 type EgressTestConfig struct {
 	flagBase
 
-	EgressNoWait             bool
-	EgressTestTarget         string
-	EgressTestTimeoutSeconds int
+	EgressNoWait             bool   `json:"egress-no-wait" mapstructure:"egress-no-wait"`
+	EgressTestTarget         string `json:"egress-test-target" mapstructure:"egress-test-target"`
+	EgressTestTimeoutSeconds int    `json:"egress-test-timeout-seconds" mapstructure:"egress-test-timeout-seconds"`
 }
 
 // NewEgressTestConfig returns a new instance of the configuration.

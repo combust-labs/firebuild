@@ -8,6 +8,11 @@ import (
 	"github.com/combust-labs/firebuild/cmd/inspect"
 	"github.com/combust-labs/firebuild/cmd/kill"
 	"github.com/combust-labs/firebuild/cmd/ls"
+
+	profileCreate "github.com/combust-labs/firebuild/cmd/profiles/create"
+	profileInspect "github.com/combust-labs/firebuild/cmd/profiles/inspect"
+	profileLs "github.com/combust-labs/firebuild/cmd/profiles/ls"
+
 	"github.com/combust-labs/firebuild/cmd/purge"
 	"github.com/combust-labs/firebuild/cmd/rootfs"
 	"github.com/combust-labs/firebuild/cmd/run"
@@ -29,6 +34,11 @@ func init() {
 	rootCmd.AddCommand(inspect.Command)
 	rootCmd.AddCommand(kill.Command)
 	rootCmd.AddCommand(ls.Command)
+
+	rootCmd.AddCommand(profileCreate.Command)
+	rootCmd.AddCommand(profileInspect.Command)
+	rootCmd.AddCommand(profileLs.Command)
+
 	rootCmd.AddCommand(purge.Command)
 	rootCmd.AddCommand(rootfs.Command)
 	rootCmd.AddCommand(run.Command)
