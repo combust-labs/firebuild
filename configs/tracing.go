@@ -1,10 +1,14 @@
 package configs
 
-import "github.com/spf13/pflag"
+import (
+	profileModel "github.com/combust-labs/firebuild/pkg/profiles/model"
+	"github.com/spf13/pflag"
+)
 
 // TracingConfig is the tracing configuration.
 type TracingConfig struct {
 	flagBase
+	ProfileInheriting `json:"-"`
 
 	ApplicationName string
 	Enable          bool
@@ -17,6 +21,20 @@ func NewTracingConfig(appName string) *TracingConfig {
 	return &TracingConfig{
 		ApplicationName: appName,
 	}
+}
+
+// UpdateFromProfile updates the configuration from a profile.
+func (c *TracingConfig) UpdateFromProfile(input *profileModel.Profile) error {
+	if input.TracingEnable {
+		c.Enable = input.TracingEnable
+	}
+	if input.TracingLogEnable {
+		c.LogEnable = input.TracingLogEnable
+	}
+	if input.TracingCollectorHostPort != "" {
+		c.HostPort = input.TracingCollectorHostPort
+	}
+	return nil
 }
 
 // FlagSet returns an instance of the flag set for the configuration.

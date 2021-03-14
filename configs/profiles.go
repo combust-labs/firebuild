@@ -56,13 +56,13 @@ func (c *ProfileCreateConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.StringVar(&c.BinaryFirecracker, "binary-firecracker", "", "Path to the Firecracker binary to use")
 		c.flagSet.StringVar(&c.BinaryJailer, "binary-jailer", "", "Path to the Firecracker Jailer binary to use")
-		c.flagSet.StringVar(&c.ChrootBase, "chroot-base", "/srv/jailer", "chroot base directory; can't be empty or /")
-		c.flagSet.StringVar(&c.RunCache, "run-cache", "/var/lib/firebuild", "Firebuild run cache directory")
+		c.flagSet.StringVar(&c.ChrootBase, "chroot-base", "", "chroot base directory; can't be empty or /")
+		c.flagSet.StringVar(&c.RunCache, "run-cache", "", "Firebuild run cache directory")
 		c.flagSet.StringVar(&c.StorageProvider, "storage-provider", "", "Storage provider to use for the profile")
 		c.flagSet.StringToStringVar(&c.StorageProviderConfigStrings, "storage-provider-property-string", map[string]string{}, "Storage provider configuration string property, multiple OK")
 		c.flagSet.StringToInt64Var(&c.StorageProviderConfigInt64s, "storage-provider-property-int64", map[string]int64{}, "Storage provider configuration int64 property, multiple OK")
 		c.flagSet.BoolVar(&c.TracingEnable, "tracing-enable", false, "Enable tracing")
-		c.flagSet.StringVar(&c.TracingCollectorHostPort, "tracing-collector-host-port", "127.0.0.1:6831", "Host port of the tracing collector")
+		c.flagSet.StringVar(&c.TracingCollectorHostPort, "tracing-collector-host-port", "", "Host port of the tracing collector")
 		c.flagSet.BoolVar(&c.TracingLogEnable, "tracing-log-enable", false, "If set, enables tracer logging")
 		c.flagSet.BoolVar(&c.Overwrite, "overwrite", false, "If profile already exists, overwrite")
 	}
