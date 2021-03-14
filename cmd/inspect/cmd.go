@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/profiles"
 	"github.com/combust-labs/firebuild/pkg/tracing"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm"
@@ -23,15 +24,17 @@ var Command = &cobra.Command{
 }
 
 var (
-	commandConfig = configs.NewInspectCommandConfig()
-	logConfig     = configs.NewLogginConfig()
-	runCache      = configs.NewRunCacheConfig()
-	tracingConfig = configs.NewTracingConfig("firebuild-vmm-inspect")
+	commandConfig  = configs.NewInspectCommandConfig()
+	logConfig      = configs.NewLogginConfig()
+	profilesConfig = configs.NewProfileCommandConfig()
+	runCache       = configs.NewRunCacheConfig()
+	tracingConfig  = configs.NewTracingConfig("firebuild-vmm-inspect")
 )
 
 func initFlags() {
 	Command.Flags().AddFlagSet(commandConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
+	Command.Flags().AddFlagSet(profilesConfig.FlagSet())
 	Command.Flags().AddFlagSet(runCache.FlagSet())
 	Command.Flags().AddFlagSet(tracingConfig.FlagSet())
 }
@@ -50,6 +53,18 @@ func processCommand() int {
 	defer cleanup.CallAll()
 
 	rootLogger := logConfig.NewLogger("inspect")
+
+	if profilesConfig.Profile != "" {
+		profile, err := profiles.ReadProfile(profilesConfig.Profile, profilesConfig.ProfileConfDir)
+		if err != nil {
+			rootLogger.Error("failed resolving profile", "reason", err, "profile", profilesConfig.Profile)
+			return 1
+		}
+		if err := profile.UpdateConfigs(runCache, tracingConfig); err != nil {
+			rootLogger.Error("error updating configuration from profile", "reason", err)
+			return 1
+		}
+	}
 
 	// tracing:
 

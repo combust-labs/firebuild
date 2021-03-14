@@ -69,17 +69,6 @@ func (c *ProfileCreateConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
-func (c *ProfileCreateConfig) GetMergedStorageConfig() map[string]interface{} {
-	result := map[string]interface{}{}
-	for k, v := range c.StorageProviderConfigStrings {
-		result[k] = v
-	}
-	for k, v := range c.StorageProviderConfigInt64s {
-		result[k] = v
-	}
-	return result
-}
-
 func (c *ProfileCreateConfig) Validate() error {
 	// these can't be empty:
 	if c.BinaryFirecracker == "" {
@@ -110,7 +99,7 @@ func (c *ProfileCreateConfig) Validate() error {
 	}
 
 	if c.StorageProvider != "" {
-		if p, err := resolver.GetStorageImplWithProvider(hclog.Default(), c.StorageProvider); p == nil || err != nil {
+		if p, err := resolver.NewDefaultResolver().GetStorageImplWithProvider(hclog.Default(), c.StorageProvider); p == nil || err != nil {
 			return errors.Wrap(err, "configured --storage-provider could not be resolved")
 		}
 	}

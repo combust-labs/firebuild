@@ -36,16 +36,29 @@ cat <<EOF > /firecracker/cni/conf.d/machine-builds.conflist
 EOF
 ```
 
+## Create a profile
+
+```sh
+sudo /usr/local/go/bin/go run ./main.go profile-create \
+	--profile=standard \
+	--binary-firecracker=$(readlink /usr/bin/firecracker) \
+	--binary-jailer=$(readlink /usr/bin/jailer) \
+	--chroot-base=/srv/jailer \
+	--run-cache=/var/lib/firebuild \
+	--storage-provider=directory \
+	--storage-provider-property-string="rootfs-storage-root=/firecracker/rootfs" \
+	--storage-provider-property-string="kernel-storage-root=/firecracker/vmlinux" \
+	--tracing-enable
+```
+
 ## Build the base operating system root file system
 
 Build a base operating system root file system. For example, Debian Buster slim:
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go baseos \
-    --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile \
-    --storage-provider=directory \
-    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --tracing-enable
+    --profile=standard \
+    --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile
 ```
 
 Because the `baseos` root file system is built completely with Docker, there is no need to configure the kernel storage.
@@ -54,11 +67,9 @@ It's possible to tag the baseos output using the `--tag=` argument, for example:
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go baseos \
+    --profile=standard \
     --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile \
-    --storage-provider=directory \
-    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --tag=custom/os:latest \
-    --tracing-enable
+    --tag=custom/os:latest
 ```
 
 ### Why
@@ -69,9 +80,7 @@ TODO: explain why is the base operating system rootfs required.
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go rootfs \
-    --binary-firecracker=$(readlink /usr/bin/firecracker) \
-    --binary-jailer=$(readlink /usr/bin/jailer) \
-    --chroot-base=/srv/jailer \
+    --profile=standard \
     --dockerfile=git+https://github.com/docker-library/postgres.git:/13/Dockerfile \
     --storage-provider=directory \
     --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
@@ -82,8 +91,7 @@ sudo /usr/local/go/bin/go run ./main.go rootfs \
     --pre-build-command='chmod 1777 /tmp' \
     --log-as-json \
     --resources-mem=512 \
-    --tag=tests/postgres:13 \
-    --tracing-enable
+    --tag=tests/postgres:13
 ```
 
 TODO: revisit the paragraph below
@@ -96,17 +104,11 @@ Once the root file system is built, start the VMM:
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go run \
-    --binary-firecracker=$(readlink /usr/bin/firecracker) \
-    --binary-jailer=$(readlink /usr/bin/jailer) \
-    --chroot-base=/srv/jailer \
-    --storage-provider=directory \
-    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --storage-provider.directory.kernel-storage-root=/firecracker/vmlinux \
+    --profile=standard \
     --from=tests/postgres:13 \
     --machine-cni-network-name=alpine \
     --machine-ssh-user=debian \
-    --machine-vmlinux-id=vmlinux-v5.8 \
-    --tracing-enable
+    --machine-vmlinux-id=vmlinux-v5.8
 ```
 
 ### Additional settings
@@ -188,13 +190,8 @@ It's possible to reference a `Dockerfile` residing in the git repository availab
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go rootfs \
-    --binary-firecracker=$(readlink /usr/bin/firecracker) \
-    --binary-jailer=$(readlink /usr/bin/jailer) \
-    --chroot-base=/srv/jailer \
+    --profile=standard \
     --dockerfile=git+https://github.com/hashicorp/docker-consul.git:/0.X/Dockerfile#master \
-    --storage-provider=directory \
-    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --storage-provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --machine-cni-network-name=machine-builds \
     --machine-ssh-user=alpine \
     --machine-vmlinux-id=vmlinux-v5.8 \
@@ -202,8 +199,7 @@ sudo /usr/local/go/bin/go run ./main.go rootfs \
     --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
     --log-as-json \
     --tag=tests/consul:1.9.3 \
-    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh \
-    --tracing-enable
+    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
 ```
 
 The URL format is:
@@ -271,21 +267,15 @@ Build v0.2.8 using git repository link, leave SSH access on:
 
 ```sh
 /usr/local/go/bin/go run ./main.go rootfs \
-    --binary-firecracker=$(readlink /usr/bin/firecracker) \
-    --binary-jailer=$(readlink /usr/bin/jailer) \
-    --chroot-base=/srv/jailer \
+    --profile=standard \
     --dockerfile=git+https://github.com/grepplabs/kafka-proxy.git:/Dockerfile#v0.2.8 \
-    --storage-provider=directory \
-    --storage-provider.directory.rootfs-storage-root=/firecracker/rootfs \
-    --storage-provider.directory.kernel-storage-root=/firecracker/vmlinux \
     --machine-cni-network-name=machine-builds \
     --machine-ssh-user=alpine \
     --machine-vmlinux-id=vmlinux-v5.8 \
     --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
     --log-as-json \
     --tag=tests/kafka-proxy:0.2.8 \
-    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh \
-    --tracing-enable
+    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
 ```
 
 ## Tracing

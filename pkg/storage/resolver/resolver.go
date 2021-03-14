@@ -25,10 +25,35 @@ func AddStorageFlags(set *pflag.FlagSet) {
 	set.AddFlagSet(StorageDirectoryFlags.GetFlags())
 }
 
+type Resolver interface {
+	GetStorageImpl(logger hclog.Logger) (storage.Provider, error)
+	GetStorageImplWithProvider(logger hclog.Logger, provider string) (storage.Provider, error)
+	ResolveProvider(logger hclog.Logger, provider string, configProvider func() storage.FlagProvider) (storage.Provider, error)
+	WithConfigurationOverride(map[string]interface{}) Resolver
+	WithTypeOverride(string) Resolver
+}
+
+type defaultResolver struct {
+	extraConfig  map[string]interface{}
+	typeOverride string
+}
+
+func NewDefaultResolver() Resolver {
+	return &defaultResolver{
+		extraConfig: map[string]interface{}{},
+	}
+}
+
 // GetStorageImpl returns the configured resolved storage provider.
-func GetStorageImpl(logger hclog.Logger) (storage.Provider, error) {
-	return ResolveProvider(logger, StorageProvider, func() storage.FlagProvider {
-		switch StorageProvider {
+func (r *defaultResolver) GetStorageImpl(logger hclog.Logger) (storage.Provider, error) {
+	provider := func() string {
+		if r.typeOverride != "" {
+			return r.typeOverride
+		}
+		return StorageProvider
+	}()
+	return r.ResolveProvider(logger, provider, func() storage.FlagProvider {
+		switch provider {
 		case "directory":
 			return StorageDirectoryFlags
 		default:
@@ -38,8 +63,8 @@ func GetStorageImpl(logger hclog.Logger) (storage.Provider, error) {
 }
 
 // GetStorageImplWithProvider returns the configured resolved storage provider.
-func GetStorageImplWithProvider(logger hclog.Logger, provider string) (storage.Provider, error) {
-	return ResolveProvider(logger, provider, func() storage.FlagProvider {
+func (r *defaultResolver) GetStorageImplWithProvider(logger hclog.Logger, provider string) (storage.Provider, error) {
+	return r.ResolveProvider(logger, provider, func() storage.FlagProvider {
 		switch provider {
 		case "directory":
 			return StorageDirectoryFlags
@@ -50,7 +75,7 @@ func GetStorageImplWithProvider(logger hclog.Logger, provider string) (storage.P
 }
 
 // ResolveProvider resolves the configured storage provider.
-func ResolveProvider(logger hclog.Logger, provider string, configProvider func() storage.FlagProvider) (storage.Provider, error) {
+func (r *defaultResolver) ResolveProvider(logger hclog.Logger, provider string, configProvider func() storage.FlagProvider) (storage.Provider, error) {
 	var impl storage.Provider
 	switch provider {
 	case "directory":
@@ -59,8 +84,24 @@ func ResolveProvider(logger hclog.Logger, provider string, configProvider func()
 	if impl == nil {
 		return impl, fmt.Errorf("provider %s not known", provider)
 	}
-	if err := impl.Configure(configProvider().GetInitializedConfiguration()); err != nil {
+	flagConfig := configProvider().GetInitializedConfiguration()
+	for k, v := range r.extraConfig {
+		flagConfig[k] = v
+	}
+	if err := impl.Configure(flagConfig); err != nil {
 		return impl, errors.Wrap(err, "failed configuring provider")
 	}
 	return impl, nil
+}
+
+func (r *defaultResolver) WithConfigurationOverride(input map[string]interface{}) Resolver {
+	for k, v := range input {
+		r.extraConfig[k] = v
+	}
+	return r
+}
+
+func (r *defaultResolver) WithTypeOverride(input string) Resolver {
+	r.typeOverride = input
+	return r
 }

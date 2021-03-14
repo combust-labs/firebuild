@@ -14,12 +14,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-type Profile struct {
-	configs.ProfileCreateConfig
-}
-
 func ListProfiles(location string) ([]string, error) {
-
 	result := []string{}
 	files, err := os.ReadDir(location)
 	if err != nil {
@@ -32,13 +27,11 @@ func ListProfiles(location string) ([]string, error) {
 			}
 		}
 	}
-
 	sort.Strings(result)
-
 	return result, nil
 }
 
-func ReadProfile(name, location string) (*model.Profile, error) {
+func ReadProfile(name, location string) (ResolvedProfile, error) {
 	profilePath := filepath.Join(location, strings.ToLower(name))
 	if _, fileErr := utils.CheckIfExistsAndIsRegular(profilePath); fileErr != nil {
 		if os.IsNotExist(fileErr) {
@@ -54,7 +47,7 @@ func ReadProfile(name, location string) (*model.Profile, error) {
 	if jsonErr := json.Unmarshal(profileBytes, profile); jsonErr != nil {
 		return nil, errors.Wrap(jsonErr, "failed unmarshaling profile")
 	}
-	return profile, nil
+	return &defaultResolvedProfile{underlying: profile}, nil
 }
 
 func WriteProfileFile(name, location string, config *configs.ProfileCreateConfig) error {
@@ -85,5 +78,39 @@ func WriteProfileFile(name, location string, config *configs.ProfileCreateConfig
 		return errors.Wrap(jsonErr, "failed writing profile config")
 	}
 
+	return nil
+}
+
+type ResolvedProfile interface {
+	Profile() *model.Profile
+	GetMergedStorageConfig() map[string]interface{}
+	UpdateConfigs(...configs.ProfileInheriting) error
+}
+
+type defaultResolvedProfile struct {
+	underlying *model.Profile
+}
+
+func (c *defaultResolvedProfile) Profile() *model.Profile {
+	return c.underlying
+}
+
+func (c *defaultResolvedProfile) GetMergedStorageConfig() map[string]interface{} {
+	result := map[string]interface{}{}
+	for k, v := range c.underlying.StorageProviderConfigStrings {
+		result[k] = v
+	}
+	for k, v := range c.underlying.StorageProviderConfigInt64s {
+		result[k] = v
+	}
+	return result
+}
+
+func (c *defaultResolvedProfile) UpdateConfigs(config ...configs.ProfileInheriting) error {
+	for _, cfg := range config {
+		if err := cfg.UpdateFromProfile(c.underlying); err != nil {
+			return err
+		}
+	}
 	return nil
 }
