@@ -1,13 +1,11 @@
 package configs
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/combust-labs/firebuild/pkg/strategy/arbitrary"
-	"github.com/combust-labs/firebuild/pkg/strategy/linkfiles"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 )
@@ -18,7 +16,7 @@ const DefaultVethIfaceName = "veth0"
 // DefaultFirectackerStrategy returns an instance of the default Firecracker Jailer strategy for a given machine config.
 func DefaultFirectackerStrategy(machineConfig *MachineConfig) arbitrary.PlacingStrategy {
 	return arbitrary.NewStrategy(func() *arbitrary.HandlerPlacement {
-		return arbitrary.NewHandlerPlacement(linkfiles.
+		return arbitrary.NewHandlerPlacement(firecracker.
 			LinkFilesHandler(filepath.Base(machineConfig.KernelOverride())),
 			firecracker.CreateLogFilesHandlerName)
 	})
@@ -51,10 +49,6 @@ func NewFcConfigProvider(jailingFcConfig *JailingFirecrackerConfig, machineConfi
 func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 
 	var fifo io.WriteCloser // TODO: do it like firectl does it
-
-	fmt.Println(" ==================> ", c.jailingFcConfig.ChrootBase)
-	fmt.Println(" ==================> ", c.machineConfig.KernelOverride())
-	fmt.Println(" ==================> ", c.machineConfig.RootfsOverride())
 
 	return firecracker.Config{
 		SocketPath:      "",      // given via Jailer
