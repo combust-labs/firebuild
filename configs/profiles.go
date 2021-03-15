@@ -70,32 +70,30 @@ func (c *ProfileCreateConfig) FlagSet() *pflag.FlagSet {
 }
 
 func (c *ProfileCreateConfig) Validate() error {
-	// these can't be empty:
-	if c.BinaryFirecracker == "" {
-		return fmt.Errorf("--binary-firecracker is empty")
-	}
-	if c.BinaryJailer == "" {
-		return fmt.Errorf("--binary-jailer is empty")
-	}
-	if c.ChrootBase == "" {
-		return fmt.Errorf("--chroot-base is empty")
-	}
-	if c.RunCache == "" {
-		return fmt.Errorf("--run-cache is empty")
-	}
 
 	// these must point to an existing location:
-	if _, err := utils.CheckIfExistsAndIsRegular(c.BinaryFirecracker); err != nil {
-		return errors.Wrap(err, "--binary-firecracker points to a non-existing location or not a regular file")
+	if c.BinaryFirecracker != "" {
+		if _, err := utils.CheckIfExistsAndIsRegular(c.BinaryFirecracker); err != nil {
+			return errors.Wrap(err, "--binary-firecracker points to a non-existing location or not a regular file")
+		}
 	}
-	if _, err := utils.CheckIfExistsAndIsRegular(c.BinaryJailer); err != nil {
-		return errors.Wrap(err, "--binary-jailer points to a non-existing location or not a regular file")
+	if c.BinaryJailer != "" {
+		if _, err := utils.CheckIfExistsAndIsRegular(c.BinaryJailer); err != nil {
+			return errors.Wrap(err, "--binary-jailer points to a non-existing location or not a regular file")
+		}
 	}
-	if _, err := utils.CheckIfExistsAndIsDirectory(c.ChrootBase); err != nil {
-		return errors.Wrap(err, "--chroot-base points to a non-existing location or not a directory")
+	if c.ChrootBase != "" {
+		if len(c.ChrootBase) > ChrootBaseMaxLength {
+			return fmt.Errorf("--chroot-base must cannot be longer than %d characters", ChrootBaseMaxLength)
+		}
+		if _, err := utils.CheckIfExistsAndIsDirectory(c.ChrootBase); err != nil {
+			return errors.Wrap(err, "--chroot-base points to a non-existing location or not a directory")
+		}
 	}
-	if _, err := utils.CheckIfExistsAndIsDirectory(c.RunCache); err != nil {
-		return errors.Wrap(err, "--run-cache points to a non-existing location or not a directory")
+	if c.RunCache == "" {
+		if _, err := utils.CheckIfExistsAndIsDirectory(c.RunCache); err != nil {
+			return errors.Wrap(err, "--run-cache points to a non-existing location or not a directory")
+		}
 	}
 
 	if c.StorageProvider != "" {
