@@ -79,7 +79,7 @@ func processCommand() int {
 	itemsWithMetadata := 0
 	itemsWithoutMetadata := 0
 
-	fileInfos, readDirErr := ioutil.ReadDir(runCache.RunCache)
+	fileInfos, readDirErr := ioutil.ReadDir(runCache.LocationRuns())
 	if readDirErr != nil {
 		rootLogger.Error("error listing run cache directory", "reason", readDirErr)
 	}
@@ -91,7 +91,7 @@ func processCommand() int {
 		spanVMM := tracer.StartSpan("vmm-fetch-metadata", opentracing.ChildOf(spanLs.Context()))
 		spanVMM.SetTag("vmm-id", vmmID)
 
-		vmmMetadata, hasMetadata, err := vmm.FetchMetadataIfExists(filepath.Join(runCache.RunCache, vmmID))
+		vmmMetadata, hasMetadata, err := vmm.FetchMetadataIfExists(filepath.Join(runCache.LocationRuns(), vmmID))
 		if err != nil {
 			rootLogger.Error("failed loading metadata file for possible VMM", "vmm-id", vmmID, "reason", err)
 			spanVMM.SetBaggageItem("error", err.Error())

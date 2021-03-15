@@ -95,9 +95,9 @@ func processCommand() int {
 
 	spanFetchMetadata := tracer.StartSpan("fetch-metadata", opentracing.ChildOf(spanKill.Context()))
 
-	vmmMetadata, hasMetadata, metadataErr := vmm.FetchMetadataIfExists(filepath.Join(runCache.RunCache, commandConfig.VMMID))
+	vmmMetadata, hasMetadata, metadataErr := vmm.FetchMetadataIfExists(filepath.Join(runCache.LocationRuns(), commandConfig.VMMID))
 	if metadataErr != nil {
-		rootLogger.Error("failed loading metadata", "reason", metadataErr, "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
+		rootLogger.Error("failed loading metadata", "reason", metadataErr, "vmm-id", commandConfig.VMMID, "run-cache", runCache.LocationRuns())
 		spanFetchMetadata.SetBaggageItem("error", metadataErr.Error())
 		spanFetchMetadata.Finish()
 		return 1
@@ -106,7 +106,7 @@ func processCommand() int {
 	spanFetchMetadata.SetTag("has-metadata", hasMetadata)
 
 	if !hasMetadata {
-		rootLogger.Error("run cache directory did not contain the VMM metadata", "vmm-id", commandConfig.VMMID, "run-cache", runCache.RunCache)
+		rootLogger.Error("run cache directory did not contain the VMM metadata", "vmm-id", commandConfig.VMMID, "run-cache", runCache.LocationRuns())
 		spanFetchMetadata.Finish()
 		return 1
 	}
@@ -243,7 +243,7 @@ func processCommand() int {
 
 	// have to clean up the cache
 	rootLogger.Info("removing the cache directory")
-	cacheDirectory := filepath.Join(runCache.RunCache, commandConfig.VMMID)
+	cacheDirectory := filepath.Join(runCache.LocationRuns(), commandConfig.VMMID)
 	if err := os.RemoveAll(cacheDirectory); err != nil {
 		rootLogger.Error("failed removing cache directroy", "reason", err, "path", cacheDirectory)
 		spanKillCache.SetBaggageItem("error", err.Error())

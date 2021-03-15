@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	profileModel "github.com/combust-labs/firebuild/pkg/profiles/model"
-	"github.com/gofrs/uuid"
+	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/spf13/pflag"
 )
 
@@ -93,7 +93,7 @@ func (c *JailingFirecrackerConfig) WithVMMID(input string) *JailingFirecrackerCo
 
 func (c *JailingFirecrackerConfig) ensure() *JailingFirecrackerConfig {
 	if c.vmmID == "" {
-		c.vmmID = strings.ReplaceAll(uuid.Must(uuid.NewV4()).String(), "-", "")
+		c.vmmID = strings.ToLower(utils.RandStringWithDigitsBytes(20))
 	}
 	return c
 }

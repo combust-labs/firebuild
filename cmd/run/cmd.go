@@ -43,7 +43,7 @@ var (
 	machineConfig    = configs.NewMachineConfig()
 	profilesConfig   = configs.NewProfileCommandConfig()
 	runCache         = configs.NewRunCacheConfig()
-	tracingConfig    = configs.NewTracingConfig("vmm-run")
+	tracingConfig    = configs.NewTracingConfig("firebuild-vmm-run")
 
 	storageResolver = resolver.NewDefaultResolver()
 )
@@ -139,12 +139,12 @@ func processCommand() int {
 	spanCacheCreate := tracer.StartSpan("create-cache-dir", opentracing.ChildOf(spanRun.Context()))
 
 	// create cache directory:
-	if err := os.MkdirAll(runCache.RunCache, 0755); err != nil {
+	if err := os.MkdirAll(runCache.LocationRuns(), 0755); err != nil {
 		rootLogger.Error("failed creating run cache directory", "reason", err)
 		return 1
 	}
 
-	cacheDirectory := filepath.Join(runCache.RunCache, jailingFcConfig.VMMID())
+	cacheDirectory := filepath.Join(runCache.LocationRuns(), jailingFcConfig.VMMID())
 	if err := os.Mkdir(cacheDirectory, 0755); err != nil {
 		rootLogger.Error("failed creating run VMM cache directory", "reason", err)
 		return 1
