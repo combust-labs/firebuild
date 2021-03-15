@@ -58,6 +58,8 @@ type Chroot interface {
 	RemoveAll() error
 	// Returns a socket file path, if file exists.
 	SocketPathIfExists() (string, bool, error)
+	// Returns a socket file path.
+	SocketPath() string
 }
 
 // NewWithLocation returns a chroot with the configured location.
@@ -122,7 +124,12 @@ func (c *defaultChroot) RemoveAll() error {
 // SocketPathIfExists fetches the VMM socket path.
 // Returns the socket path, a boolean indicating if the socket exists and an error if existence check went wrong.
 func (c *defaultChroot) SocketPathIfExists() (string, bool, error) {
-	socketPath := filepath.Join(c.FullPath(), "root/run/firecracker.socket")
+	socketPath := c.SocketPath()
 	hasSocket, existsErr := utils.PathExists(socketPath)
 	return socketPath, hasSocket, existsErr
+}
+
+// SocketPath returns the socket path for the VMM chroot.
+func (c *defaultChroot) SocketPath() string {
+	return filepath.Join(c.FullPath(), "root/run/firecracker.socket")
 }

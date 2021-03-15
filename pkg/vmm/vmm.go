@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/vmm/chroot"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/hashicorp/go-hclog"
 	"github.com/sirupsen/logrus"
@@ -55,10 +56,21 @@ func NewDefaultProvider(cniConfig *configs.CNIConfig, jailingFcConfig *configs.J
 }
 
 func (p *defaultProvider) Start(ctx context.Context) (StartedMachine, error) {
-	vmmLogger := logrus.New()
+
+	machineChroot := chroot.NewWithLocation(chroot.LocationFromComponents(p.jailingFcConfig.JailerChrootDirectory(),
+		p.jailingFcConfig.BinaryFirecracker,
+		p.jailingFcConfig.VMMID()))
+
+	vmmLoggerEntry := logrus.NewEntry(logrus.New())
 	machineOpts := []firecracker.Opt{
-		firecracker.WithLogger(logrus.NewEntry(vmmLogger)),
+		firecracker.WithLogger(vmmLoggerEntry),
 	}
+
+	if p.machineConfig.LogFcHTTPCalls {
+		machineOpts = append(machineOpts, firecracker.
+			WithClient(firecracker.NewClient(machineChroot.SocketPath(), vmmLoggerEntry, true)))
+	}
+
 	fcConfig := configs.NewFcConfigProvider(p.jailingFcConfig, p.machineConfig).
 		WithHandlersAdapter(p.handlersAdapter).
 		WithVethIfaceName(p.vethIfaceName).

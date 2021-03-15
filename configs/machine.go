@@ -21,7 +21,8 @@ type MachineConfig struct {
 	ResourcesCPU                 int64  `json:"machine-resources-cpu" mapstructure:"machine-resources-cpu"`
 	ResourcesMem                 int64  `json:"machine-resources-mem" mapstructure:"machine-resources-mem"`
 
-	ShutdownGracefulTimeoutSeconds int `json:"shutdown-graceful-timeout-seconds" mapstructure:"shutdown-graceful-timeout-seconds"`
+	LogFcHTTPCalls                 bool `json:"log-firecracker-http-calls" mapstructure:"log-firecracker-http-calls"`
+	ShutdownGracefulTimeoutSeconds int  `json:"shutdown-graceful-timeout-seconds" mapstructure:"shutdown-graceful-timeout-seconds"`
 
 	daemonize      bool
 	kernelOverride string
@@ -51,6 +52,8 @@ func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.MachineVMLinuxID, "machine-vmlinux-id", "", "Kernel ID / name")
 		c.flagSet.Int64Var(&c.ResourcesCPU, "resources-cpu", 1, "Number of CPU for the build VMM")
 		c.flagSet.Int64Var(&c.ResourcesMem, "resources-mem", 128, "Amount of memory for the VMM")
+
+		c.flagSet.BoolVar(&c.LogFcHTTPCalls, "log-firecracker-http-calls", false, "If set, logs Firecracker HTTP client calls in debug mode")
 		c.flagSet.IntVar(&c.ShutdownGracefulTimeoutSeconds, "shutdown-graceful-timeout-seconds", 30, "Grafeul shotdown timeout before vmm is stopped forcefully")
 	}
 	return c.flagSet
