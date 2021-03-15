@@ -135,6 +135,6 @@ func (m *defaultStartedMachine) cleanupCNINetwork() error {
 	return cni.CleanupCNI(m.logger, m.cniConfig,
 		m.machine.Cfg.VMID,
 		m.vethIfaceName,
-		m.machine.Cfg.NetNS,
-		m.machineConfig.MachineCNINetworkName)
+		m.machineConfig.MachineCNINetworkName,
+		m.machine.Cfg.NetNS)
 }
