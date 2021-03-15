@@ -79,19 +79,22 @@ func processCommand() int {
 
 	cleanup.Add(tracerCleanupFunc)
 
+	rootLogger, spanPurge := tracing.ApplyTraceLogDiscovery(rootLogger, tracer.StartSpan("purge"))
+	cleanup.Add(func() {
+		spanPurge.Finish()
+	})
+
 	validatingConfigs := []configs.ValidatingConfig{
 		runCache,
 	}
 
 	for _, validatingConfig := range validatingConfigs {
 		if err := validatingConfig.Validate(); err != nil {
+			spanPurge.SetBaggageItem("error", err.Error())
 			rootLogger.Error("configuration is invalid", "reason", err)
 			return 1
 		}
 	}
-
-	spanPurge := tracer.StartSpan("purge")
-	defer spanPurge.Finish()
 
 	fileInfos, readDirErr := ioutil.ReadDir(runCache.LocationRuns())
 	if readDirErr != nil {

@@ -111,7 +111,7 @@ func processCommand() int {
 
 	regularDefers.Add(tracerCleanupFunc)
 
-	spanRun := tracer.StartSpan("run")
+	rootLogger, spanRun := tracing.ApplyTraceLogDiscovery(rootLogger, tracer.StartSpan("run"))
 	spanRun.SetTag("vmm-id", jailingFcConfig.VMMID())
 	spanRun.SetTag("hostname", commandConfig.Hostname)
 	defer spanRun.Finish()
@@ -119,6 +119,7 @@ func processCommand() int {
 	// storage:
 	storageImpl, resolveErr := storageResolver.GetStorageImpl(rootLogger)
 	if resolveErr != nil {
+		spanRun.SetBaggageItem("error", resolveErr.Error())
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
 		return 1
 	}
@@ -131,6 +132,7 @@ func processCommand() int {
 
 	for _, validatingConfig := range validatingConfigs {
 		if err := validatingConfig.Validate(); err != nil {
+			spanRun.SetBaggageItem("error", resolveErr.Error())
 			rootLogger.Error("configuration is invalid", "reason", err)
 			return 1
 		}
@@ -141,20 +143,27 @@ func processCommand() int {
 	// create cache directory:
 	if err := os.MkdirAll(runCache.LocationRuns(), 0755); err != nil {
 		rootLogger.Error("failed creating run cache directory", "reason", err)
+		spanCacheCreate.SetBaggageItem("error", err.Error())
+		spanCacheCreate.Finish()
 		return 1
 	}
 
 	cacheDirectory := filepath.Join(runCache.LocationRuns(), jailingFcConfig.VMMID())
 	if err := os.Mkdir(cacheDirectory, 0755); err != nil {
 		rootLogger.Error("failed creating run VMM cache directory", "reason", err)
+		spanCacheCreate.SetBaggageItem("error", err.Error())
+		spanCacheCreate.Finish()
 		return 1
 	}
 
 	cleanup.Add(func() {
+		span := tracer.StartSpan("cleanup-cache-dir", opentracing.ChildOf(spanCacheCreate.Context()))
 		rootLogger.Info("cleaning up temp build directory")
 		if err := os.RemoveAll(cacheDirectory); err != nil {
 			rootLogger.Info("temp build directory removal status", "error", err)
+			span.SetBaggageItem("error", err.Error())
 		}
+		span.Finish()
 	})
 
 	spanCacheCreate.Finish()
@@ -167,6 +176,8 @@ func processCommand() int {
 	})
 	if kernelResolveErr != nil {
 		rootLogger.Error("failed resolving kernel", "reason", kernelResolveErr)
+		spanResolveKernel.SetBaggageItem("error", kernelResolveErr.Error())
+		spanResolveKernel.Finish()
 		return 1
 	}
 
@@ -184,6 +195,8 @@ func processCommand() int {
 	})
 	if rootfsResolveErr != nil {
 		rootLogger.Error("failed resolving rootfs", "reason", rootfsResolveErr)
+		spanResolveRootfs.SetBaggageItem("error", rootfsResolveErr.Error())
+		spanResolveRootfs.Finish()
 		return 1
 	}
 
@@ -195,6 +208,8 @@ func processCommand() int {
 	mdRootfs, unwrapErr := metadata.MDRootfsFromInterface(resolvedRootfs.Metadata().(map[string]interface{}))
 	if unwrapErr != nil {
 		rootLogger.Error("failed unwrapping metadata", "reason", unwrapErr)
+		spanRootfsMetadata.SetBaggageItem("error", unwrapErr.Error())
+		spanRootfsMetadata.Finish()
 		return 1
 	}
 
@@ -211,6 +226,8 @@ func processCommand() int {
 			"source", resolvedRootfs.HostPath(),
 			"target", runRootfs,
 			"reason", err)
+		spanRootfsCopy.SetBaggageItem("error", err.Error())
+		spanRootfsCopy.Finish()
 		return 1
 	}
 
@@ -232,13 +249,6 @@ func processCommand() int {
 		"from", commandConfig.From,
 		"source-rootfs", machineConfig.RootfsOverride(),
 		"jail", jailingFcConfig.JailerChrootDirectory())
-
-	cleanup.Add(func() {
-		vmmLogger.Info("cleaning up jail directory")
-		if err := os.RemoveAll(jailingFcConfig.JailerChrootDirectory()); err != nil {
-			vmmLogger.Info("jail directory removal status", "error", err)
-		}
-	})
 
 	// gather the running vmm metadata:
 	runMetadata := &metadata.MDRun{
@@ -310,11 +320,23 @@ func processCommand() int {
 
 	spanVMMCreate.Finish()
 
+	cleanup.Add(func() {
+		span := tracer.StartSpan("run-cleanup-jail", opentracing.ChildOf(spanVMMCreate.Context()))
+		vmmLogger.Info("cleaning up jail directory")
+		if err := os.RemoveAll(jailingFcConfig.JailerChrootDirectory()); err != nil {
+			vmmLogger.Error("jail directory removal status", "error", err)
+			span.SetBaggageItem("error", err.Error())
+		}
+		span.Finish()
+	})
+
 	spanVMMStart := tracer.StartSpan("run-vmm-start", opentracing.ChildOf(spanVMMCreate.Context()))
 
 	startedMachine, runErr := vmmProvider.Start(vmmCtx)
 	if runErr != nil {
 		vmmLogger.Error("firecracker VMM did not start, run failed", "reason", runErr)
+		spanVMMStart.SetBaggageItem("error", runErr.Error())
+		spanVMMStart.Finish()
 		return 1
 	}
 

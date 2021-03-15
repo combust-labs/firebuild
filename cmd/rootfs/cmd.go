@@ -111,7 +111,7 @@ func processCommand() int {
 
 	cleanup.Add(tracerCleanupFunc)
 
-	spanBuild := tracer.StartSpan("build-rootfs")
+	rootLogger, spanBuild := tracing.ApplyTraceLogDiscovery(rootLogger, tracer.StartSpan("build-rootfs"))
 	cleanup.Add(func() {
 		spanBuild.Finish()
 	})

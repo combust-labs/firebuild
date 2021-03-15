@@ -48,3 +48,12 @@ func GetTracer(logger hclog.Logger, config *configs.TracingConfig) (opentracing.
 		closer.Close()
 	}, nil
 }
+
+// ApplyTraceLogDiscovery applied a traceId to the log entries.
+func ApplyTraceLogDiscovery(logger hclog.Logger, span opentracing.Span) (hclog.Logger, opentracing.Span) {
+	if sc, ok := span.Context().(jaeger.SpanContext); ok {
+		// apply the trace log discovery pattern
+		return logger.With("traceId", sc.TraceID().String()), span
+	}
+	return logger, span
+}

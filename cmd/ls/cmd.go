@@ -73,8 +73,10 @@ func processCommand() int {
 
 	cleanup.Add(tracerCleanupFunc)
 
-	spanLs := tracer.StartSpan("ls")
-	defer spanLs.Finish()
+	rootLogger, spanLs := tracing.ApplyTraceLogDiscovery(rootLogger, tracer.StartSpan("ls"))
+	cleanup.Add(func() {
+		spanLs.Finish()
+	})
 
 	itemsWithMetadata := 0
 	itemsWithoutMetadata := 0

@@ -78,20 +78,23 @@ func processCommand() int {
 
 	cleanup.Add(tracerCleanupFunc)
 
+	rootLogger, spanInspect := tracing.ApplyTraceLogDiscovery(rootLogger, tracer.StartSpan("inspect"))
+	spanInspect.SetTag("vmm-id", commandConfig.VMMID)
+	cleanup.Add(func() {
+		spanInspect.Finish()
+	})
+
 	validatingConfigs := []configs.ValidatingConfig{
 		runCache,
 	}
 
 	for _, validatingConfig := range validatingConfigs {
 		if err := validatingConfig.Validate(); err != nil {
+			spanInspect.SetBaggageItem("error", err.Error())
 			rootLogger.Error("configuration is invalid", "reason", err)
 			return 1
 		}
 	}
-
-	spanInspect := tracer.StartSpan("inspect")
-	spanInspect.SetTag("vmm-id", commandConfig.VMMID)
-	defer spanInspect.Finish()
 
 	spanFetchMetadata := tracer.StartSpan("fetch-metadata", opentracing.ChildOf(spanInspect.Context()))
 
