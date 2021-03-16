@@ -113,6 +113,8 @@ func (dr *defaultResolver) resolveResources(originalSource, resourcePath, target
 	if originalSource == "" {
 		return nil, fmt.Errorf("empty: '%s' not resolvable", resourcePath)
 	}
+
+	// this here checks if the ADD relative/resource is within the same location as the https://..../Dockerfile
 	if strings.HasPrefix(originalSource, "http://") || strings.HasPrefix(originalSource, "https://") {
 		parent := filepath.Dir(originalSource)
 		parent = strings.Replace(strings.Replace(parent, "http:/", "http://", 1), "https:/", "https://", 1)
@@ -147,6 +149,25 @@ func (dr *defaultResolver) resolveResources(originalSource, resourcePath, target
 
 		return append(resources, &defaultResolvedResource{contentsReader: httpContentSupplier,
 			resolved:      newPath,
+			targetMode:    fs.FileMode(0644),
+			sourcePath:    resourcePath,
+			targetPath:    targetPath,
+			targetWorkdir: targetWorkdir,
+			targetUser:    targetUser}), nil
+	}
+
+	// this here handles ADD / COPY (we don't distinguish) for a http source:
+	if strings.HasPrefix(resourcePath, "http://") || strings.HasPrefix(resourcePath, "https://") {
+		httpContentSupplier := func() (io.ReadCloser, error) {
+			// we have the temp file:
+			httpResponse, err := http.Get(resourcePath)
+			if err != nil {
+				return nil, err
+			}
+			return httpResponse.Body, nil
+		}
+		return append(resources, &defaultResolvedResource{contentsReader: httpContentSupplier,
+			resolved:      resourcePath,
 			targetMode:    fs.FileMode(0644),
 			sourcePath:    resourcePath,
 			targetPath:    targetPath,
