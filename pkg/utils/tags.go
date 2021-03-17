@@ -2,7 +2,7 @@ package utils
 
 import "regexp"
 
-const regexpString = "([a-z0-9]{1,60})/([a-z0-9\\-]{1,60}):([a-z0-9.]{1,15})"
+const regexpString = "([a-z0-9\\-]{1,60})/([a-z0-9\\-]{1,60}):([a-z0-9.]{1,15})"
 
 // IsValidTag checks if the given image tag is valid.
 func IsValidTag(input string) bool {
