@@ -358,10 +358,10 @@ func processCommand() int {
 	cleanup.Add(func() {
 		span := tracer.StartSpan("rootfs-cleanup-temp", opentracing.ChildOf(spanBuild.Context()))
 		vmmLogger.Info("cleaning up jail directory")
-		//if err := os.RemoveAll(jailingFcConfig.JailerChrootDirectory()); err != nil {
-		//	vmmLogger.Info("jail directory removal status", "error", err)
-		//	span.SetBaggageItem("error", err.Error())
-		//}
+		if err := os.RemoveAll(jailingFcConfig.JailerChrootDirectory()); err != nil {
+			vmmLogger.Info("jail directory removal status", "error", err)
+			span.SetBaggageItem("error", err.Error())
+		}
 		span.Finish()
 	})
 
@@ -419,10 +419,11 @@ func processCommand() int {
 	spanVMMStart.Finish()
 
 	ipAddress := runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP
+	gateway := runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.Gateway
 
 	vmmLogger = vmmLogger.With("ip-address", ipAddress)
 
-	vmmLogger.Info("VMM running")
+	vmmLogger.Info("VMM running", "gateway", gateway)
 
 	spanRemoteConnect := tracer.StartSpan("rootfs-remote-connect", opentracing.ChildOf(spanVMMStart.Context()))
 
@@ -450,9 +451,24 @@ func processCommand() int {
 		spanEgressWait := tracer.StartSpan("rootfs-egress-wait", opentracing.ChildOf(spanRemoteConnect.Context()))
 		egressCtx, egressWaitCancelFunc := context.WithTimeout(vmmCtx, time.Second*time.Duration(egressTestConfig.EgressTestTimeoutSeconds))
 		defer egressWaitCancelFunc()
-		if err := remoteClient.WaitForEgress(egressCtx, egressTestConfig.EgressTestTarget); err != nil {
+
+		egressTarget := egressTestConfig.EgressTestTarget
+		if egressTarget == "" && gateway != "" {
+			egressTarget = gateway
+		}
+
+		if egressTarget == "" {
+			err := fmt.Errorf("egress test not possible without egress target: no gateway nor explicit target")
 			startedMachine.Stop(vmmCtx, remoteClient)
-			vmmLogger.Error("Did not get egress connectivity within a timeout", "reason", err)
+			vmmLogger.Error(err.Error())
+			spanEgressWait.SetBaggageItem("error", err.Error())
+			spanEgressWait.Finish()
+			return 1
+		}
+
+		if err := remoteClient.WaitForEgress(egressCtx, egressTarget); err != nil {
+			startedMachine.Stop(vmmCtx, remoteClient)
+			vmmLogger.Error("did not get egress connectivity within a timeout", "reason", err)
 			spanEgressWait.SetBaggageItem("error", err.Error())
 			spanEgressWait.Finish()
 			return 1
