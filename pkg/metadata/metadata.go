@@ -81,6 +81,7 @@ type MDRootfs struct {
 	Ports        []string          `json:"ports" mapstructure:"ports"`
 	Tag          string            `json:"tag" mapstructure:"tag"`
 	Type         Type              `json:"type" mapstructure:"type"`
+	Volumes      []string          `json:"volumes" mapstructure:"volumes"`
 }
 
 // MDRootfsFromInterface unwraps an interface{} as *MDRootfs.

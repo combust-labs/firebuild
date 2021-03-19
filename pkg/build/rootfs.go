@@ -26,6 +26,7 @@ type Build interface {
 	ExposedPorts() []string
 	From() commands.From
 	Metadata() map[string]string
+	Volumes() []string
 	WithBuildArgs(map[string]string) Build
 	WithDependencyResources(map[string][]resources.ResolvedResource) Build
 	WithExcludes([]string) Build
@@ -61,6 +62,8 @@ type defaultBuild struct {
 	preBuildCommands  []commands.Run
 
 	resolvedResources map[string][]resources.ResolvedResource
+
+	volumes []string
 }
 
 func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
@@ -182,6 +185,7 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 			}
 		case commands.Volume:
 			for _, vol := range tcommand.Values {
+				b.volumes = append(b.volumes, vol)
 				run := commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s'", vol))
 				run.User = tcommand.User
 				run.Workdir = tcommand.Workdir
@@ -395,6 +399,10 @@ func (b *defaultBuild) Metadata() map[string]string {
 	return b.currentMetadata
 }
 
+func (b *defaultBuild) Volumes() []string {
+	return b.volumes
+}
+
 func (b *defaultBuild) WithBuildArgs(input map[string]string) Build {
 	b.buildArgs = input
 	return b
@@ -451,6 +459,7 @@ func NewDefaultBuild() Build {
 		logger:            hclog.Default(),
 		resolver:          resources.NewDefaultResolver(),
 		resolvedResources: map[string][]resources.ResolvedResource{},
+		volumes:           []string{},
 	}
 }
 
