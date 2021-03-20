@@ -290,7 +290,7 @@ func processCommand() int {
 
 	// resolve kernel:
 	resolvedKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
-		ID: machineConfig.MachineVMLinuxID,
+		ID: machineConfig.VMLinuxID,
 	})
 	if kernelResolveErr != nil {
 		rootLogger.Error("failed resolving kernel", "reason", kernelResolveErr)
@@ -373,7 +373,7 @@ func processCommand() int {
 	strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
 		Chroot:         jailingFcConfig.JailerChrootDirectory(),
 		RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
-		SSHUser:        machineConfig.MachineSSHUser,
+		SSHUser:        machineConfig.SSHUser,
 		PublicKeys: []ssh.PublicKey{
 			sshPublicKey,
 		},
@@ -429,10 +429,10 @@ func processCommand() int {
 
 	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
 		SSHPrivateKey:      *rsaPrivateKey,
-		SSHUsername:        machineConfig.MachineSSHUser,
+		SSHUsername:        machineConfig.SSHUser,
 		IP:                 net.ParseIP(ipAddress),
-		Port:               machineConfig.MachineSSHPort,
-		EnableAgentForward: machineConfig.MachineSSHEnableAgentForward,
+		Port:               machineConfig.SSHPort,
+		EnableAgentForward: machineConfig.SSHEnableAgentForward,
 	}, vmmLogger.Named("remote-client"))
 
 	if remoteErr != nil {

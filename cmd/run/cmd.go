@@ -172,7 +172,7 @@ func processCommand() int {
 
 	// resolve kernel:
 	resolvedKernel, kernelResolveErr := storageImpl.FetchKernel(&storage.KernelLookup{
-		ID: machineConfig.MachineVMLinuxID,
+		ID: machineConfig.VMLinuxID,
 	})
 	if kernelResolveErr != nil {
 		rootLogger.Error("failed resolving kernel", "reason", kernelResolveErr)
@@ -284,7 +284,7 @@ func processCommand() int {
 		strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
 			Chroot:         jailingFcConfig.JailerChrootDirectory(),
 			RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
-			SSHUser:        machineConfig.MachineSSHUser,
+			SSHUser:        machineConfig.SSHUser,
 			Metadata:       runMetadata,
 			// VMM settings:
 			Environment: vmmEnvironment,
