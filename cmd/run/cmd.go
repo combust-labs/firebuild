@@ -23,7 +23,6 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/opentracing/opentracing-go"
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/ssh"
 )
 
 // Command is the build command declaration.
@@ -253,15 +252,14 @@ func processCommand() int {
 	// gather the running vmm metadata:
 	runMetadata := &metadata.MDRun{
 		Configs: metadata.MDRunConfigs{
-			CNI:     cniConfig,
-			Jailer:  jailingFcConfig,
-			Machine: machineConfig,
+			CNI:       cniConfig,
+			Jailer:    jailingFcConfig,
+			Machine:   machineConfig,
+			RunConfig: commandConfig,
 		},
-		Hostname:     commandConfig.Hostname,
-		IdentityFile: commandConfig.IdentityFile,
-		Rootfs:       mdRootfs,
-		RunCache:     cacheDirectory,
-		Type:         metadata.MetadataTypeRun,
+		Rootfs:   mdRootfs,
+		RunCache: cacheDirectory,
+		Type:     metadata.MetadataTypeRun,
 	}
 
 	vmmStrategy := configs.DefaultFirectackerStrategy(machineConfig)
@@ -272,14 +270,10 @@ func processCommand() int {
 			rootLogger.Error("failed merging environment", "reason", envErr)
 			return 1
 		}
-		strategyPublicKeys := []ssh.PublicKey{}
-		if commandConfig.IdentityFile != "" {
-			sshPublicKey, readErr := utils.SSHPublicKeyFromFile(commandConfig.IdentityFile)
-			if readErr != nil {
-				rootLogger.Error("failed reading an SSH key configured with --identity-file", "reason", readErr)
-				return 1
-			}
-			strategyPublicKeys = append(strategyPublicKeys, sshPublicKey)
+		strategyPublicKeys, keysErr := commandConfig.PublicKeys()
+		if keysErr != nil {
+			rootLogger.Error("failed reading an SSH key configured with --identity-file", "reason", keysErr)
+			return 1
 		}
 		strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
 			Chroot:         jailingFcConfig.JailerChrootDirectory(),

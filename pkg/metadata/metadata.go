@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm/pid"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
@@ -95,9 +96,10 @@ func MDRootfsFromInterface(input interface{}) (*MDRootfs, error) {
 
 // MDRunConfigs contains the configuration of the running VMM.
 type MDRunConfigs struct {
-	CNI     *configs.CNIConfig                `json:"cni" mapstructure:"cni"`
-	Jailer  *configs.JailingFirecrackerConfig `json:"jailer" mapstructure:"jailer"`
-	Machine *configs.MachineConfig            `json:"machine" mapstructure:"machine"`
+	CNI       *configs.CNIConfig                `json:"cni" mapstructure:"cni"`
+	Jailer    *configs.JailingFirecrackerConfig `json:"jailer" mapstructure:"jailer"`
+	Machine   *configs.MachineConfig            `json:"machine" mapstructure:"machine"`
+	RunConfig *configs.RunCommandConfig         `json:"run-config" mapstructure:"run-config"`
 }
 
 // MDRunCNI represents the CNI metadata of a running VMM.
@@ -113,8 +115,6 @@ type MDRun struct {
 	CNI               MDRunCNI             `json:"cni" mapstructure:"cni"`
 	Configs           MDRunConfigs         `json:"configs" mapstructure:"configs"`
 	Drives            []models.Drive       `json:"drivers" mapstructure:"drives"`
-	Hostname          string               `json:"hostname" mapstructure:"hostname"`
-	IdentityFile      string               `json:"identity-file" mapstructure:"identity-file"`
 	NetworkInterfaces []MDNetworkInterafce `json:"network-interfaces" mapstructure:"network-interfaces"`
 	PID               pid.RunningVMMPID    `json:"pid" mapstructure:"pid"`
 	Rootfs            *MDRootfs            `json:"rootfs" mapstructure:"rootfs"`
@@ -124,12 +124,38 @@ type MDRun struct {
 	Type              Type                 `json:"type" mapstructure:"type"`
 }
 
-func (r *MDRun) ToMMDS() (interface{}, error) {
-	output := map[string]interface{}{}
-	if err := mapstructure.Decode(r, &output); err != nil {
-		return nil, err
+func (r *MDRun) AsMMDS() (interface{}, error) {
+
+	env, err := r.Configs.RunConfig.MergedEnvironment()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed fetching merged env")
 	}
-	return output, nil
+	keys, err := r.Configs.RunConfig.PublicKeys()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed fetching public keys")
+	}
+
+	metadata := &MMDSLatest{
+		Latest: &MMDSLatestMetadata{
+			Metadata: &MMDSData{
+				VMMID:             r.VMMID,
+				Drives:            r.Drives,
+				Env:               env,
+				Hostname:          r.Configs.RunConfig.Hostname,
+				MachineConfig:     r.Configs.Machine,
+				NetworkInterfaces: r.NetworkInterfaces,
+				Rootfs:            r.Rootfs,
+				SSHKeys: func() []string {
+					resp := []string{}
+					for _, key := range keys {
+						resp = append(resp, string(utils.MarshalSSHPublicKey(key)))
+					}
+					return resp
+				}(),
+			},
+		},
+	}
+	return metadata.Serialize()
 }
 
 // FcNetworkInterfacesToMetadata converts firecracker network interfaces to the metadata network interfaces.

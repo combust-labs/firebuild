@@ -46,12 +46,12 @@ func NewMetadataExtractorHandler(logger hclog.Logger, md *metadata.MDRun) firecr
 			md.VMMID = m.Cfg.VMID
 
 			if setMetadata {
-				serializedMetadata, err := md.ToMMDS()
+				serializedMetadata, err := md.AsMMDS()
 				if err != nil {
 					logger.Error("error while serializing metadata to mmds metadata", "reason", err)
 					return err
 				}
-				logger.Debug("mmds enabled, setting mmds metadata", "metadata", serializedMetadata)
+				logger.Trace("mmds enabled, setting mmds metadata", "metadata", serializedMetadata)
 				m.SetMetadata(ctx, serializedMetadata)
 			}
 
