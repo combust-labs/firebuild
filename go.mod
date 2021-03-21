@@ -3,11 +3,12 @@ module github.com/combust-labs/firebuild
 go 1.16
 
 require (
+	github.com/combust-labs/firebuild-mmds v0.0.1
 	github.com/containernetworking/cni v0.8.0
 	github.com/docker/docker v20.10.4+incompatible
 	github.com/firecracker-microvm/firecracker-go-sdk v0.22.0
 	github.com/go-git/go-git/v5 v5.2.0
-	github.com/gofrs/uuid v4.0.0+incompatible
+	github.com/gofrs/uuid v4.0.0+incompatible // indirect
 	github.com/hashicorp/go-hclog v0.15.0
 	github.com/hashicorp/go-multierror v1.0.0
 	github.com/mitchellh/mapstructure v1.3.2
