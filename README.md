@@ -112,9 +112,9 @@ TODO: explain why is the base operating system rootfs required.
 sudo /usr/local/go/bin/go run ./main.go rootfs \
     --profile=standard \
     --dockerfile=git+https://github.com/docker-library/postgres.git:/13/Dockerfile \
-    --machine-cni-network-name=machine-builds \
-    --machine-ssh-user=debian \
-    --machine-vmlinux-id=vmlinux-v5.8 \
+    --cni-network-name=machine-builds \
+    --ssh-user=debian \
+    --vmlinux-id=vmlinux-v5.8 \
     --pre-build-command='chmod 1777 /tmp' \
     --log-as-json \
     --resources-mem=512 \
@@ -133,9 +133,9 @@ Once the root file system is built, start the VMM:
 sudo /usr/local/go/bin/go run ./main.go run \
     --profile=standard \
     --from=tests/postgres:13 \
-    --machine-cni-network-name=alpine \
-    --machine-ssh-user=debian \
-    --machine-vmlinux-id=vmlinux-v5.8
+    --cni-network-name=alpine \
+    --ssh-user=debian \
+    --vmlinux-id=vmlinux-v5.8
 ```
 
 ### Additional settings
@@ -219,9 +219,9 @@ It's possible to reference a `Dockerfile` residing in the git repository availab
 sudo /usr/local/go/bin/go run ./main.go rootfs \
     --profile=standard \
     --dockerfile=git+https://github.com/hashicorp/docker-consul.git:/0.X/Dockerfile#master \
-    --machine-cni-network-name=machine-builds \
-    --machine-ssh-user=alpine \
-    --machine-vmlinux-id=vmlinux-v5.8 \
+    --cni-network-name=machine-builds \
+    --ssh-user=alpine \
+    --vmlinux-id=vmlinux-v5.8 \
     --post-build-command='chmod -x /etc/init.d/sshd' \
     --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
     --log-as-json \
@@ -296,9 +296,9 @@ Build v0.2.8 using git repository link, leave SSH access on:
 /usr/local/go/bin/go run ./main.go rootfs \
     --profile=standard \
     --dockerfile=git+https://github.com/grepplabs/kafka-proxy.git:/Dockerfile#v0.2.8 \
-    --machine-cni-network-name=machine-builds \
-    --machine-ssh-user=alpine \
-    --machine-vmlinux-id=vmlinux-v5.8 \
+    --cni-network-name=machine-builds \
+    --ssh-user=alpine \
+    --vmlinux-id=vmlinux-v5.8 \
     --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
     --log-as-json \
     --tag=tests/kafka-proxy:0.2.8 \

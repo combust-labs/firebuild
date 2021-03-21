@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm/pid"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/firecracker-microvm/firecracker-go-sdk/client/models"
@@ -36,31 +37,31 @@ type MDImage struct {
 
 // MDNetIPConfiguration is the IP configuration of a running VMM.
 type MDNetIPConfiguration struct {
-	Gateway     string   `json:"gateway"`
-	IfName      string   `json:"ifname"`
-	IP          string   `json:"ip"`
-	IPAddr      string   `json:"ip-addr"`
-	IPMask      string   `json:"ip-mask"`
-	IPNet       string   `json:"ip-net"`
-	Nameservers []string `json:"ip-configuration"`
+	Gateway     string   `json:"gateway" mapstructure:"gateway"`
+	IfName      string   `json:"ifname" mapstructure:"ifname"`
+	IP          string   `json:"ip" mapstructure:"ip"`
+	IPAddr      string   `json:"ip-addr" mapstructure:"ip-addr"`
+	IPMask      string   `json:"ip-mask" mapstructure:"ip-mask"`
+	IPNet       string   `json:"ip-net" mapstructure:"ip-net"`
+	Nameservers []string `json:"nameservers" mapstructure:"nameservers"`
 }
 
 // MDNetStaticConfiguration is the static network configuration of a running VMM.
 type MDNetStaticConfiguration struct {
-	MacAddress string `json:"mac-address"`
+	MacAddress string `json:"mac-address" mapstructure:"mac-address"`
 	// HostDevName is the name of the tap device the VM will use
-	HostDevName string `json:"host-dev-name"`
+	HostDevName string `json:"host-dev-name" mapstructure:"host-dev-name"`
 	// IPConfiguration (optional) allows a static IP, gateway and up to 2 DNS nameservers
 	// to be automatically configured within the VM upon startup.
-	IPConfiguration *MDNetIPConfiguration `json:"ip-configuration"`
+	IPConfiguration *MDNetIPConfiguration `json:"ip-configuration" mapstructure:"ip=configuration"`
 }
 
 // MDNetworkInterafce is network interface configuration of a running VMM.
 type MDNetworkInterafce struct {
-	AllowMMDS           bool                      `json:"allow-mmds"`
-	InRateLimiter       *models.RateLimiter       `json:"in-rate-limiter"`
-	OutRateLimiter      *models.RateLimiter       `json:"out-rate-limiter"`
-	StaticConfiguration *MDNetStaticConfiguration `json:"static-configuration"`
+	AllowMMDS           bool                      `json:"allow-mmds" mapstructure:"allow-mmds"`
+	InRateLimiter       *models.RateLimiter       `json:"in-rate-limiter" mapstructure:"in-rate-limiter"`
+	OutRateLimiter      *models.RateLimiter       `json:"out-rate-limiter" mapstructure:"out-rate-limiter"`
+	StaticConfiguration *MDNetStaticConfiguration `json:"static-configuration" mapstructure:"static-configuration"`
 }
 
 // MDRootfsConfig represents the rootfs build configuration.
@@ -95,33 +96,66 @@ func MDRootfsFromInterface(input interface{}) (*MDRootfs, error) {
 
 // MDRunConfigs contains the configuration of the running VMM.
 type MDRunConfigs struct {
-	CNI     *configs.CNIConfig                `json:"cni"`
-	Jailer  *configs.JailingFirecrackerConfig `json:"jailer"`
-	Machine *configs.MachineConfig            `json:"machine"`
+	CNI       *configs.CNIConfig                `json:"cni" mapstructure:"cni"`
+	Jailer    *configs.JailingFirecrackerConfig `json:"jailer" mapstructure:"jailer"`
+	Machine   *configs.MachineConfig            `json:"machine" mapstructure:"machine"`
+	RunConfig *configs.RunCommandConfig         `json:"run-config" mapstructure:"run-config"`
 }
 
 // MDRunCNI represents the CNI metadata of a running VMM.
 // This metadata is stored in the VMM run cache directory.
 type MDRunCNI struct {
-	VethIfaceName string `json:"veth-iface-name"`
-	NetName       string `json:"net-name"`
-	NetNS         string `json:"net-ns"`
+	VethIfaceName string `json:"veth-iface-name" mapstructure:"veth-iface-name"`
+	NetName       string `json:"net-name" mapstructure:"net-name"`
+	NetNS         string `json:"net-ns" mapstructure:"net-ns"`
 }
 
 // MDRun contains the runtime information about a VMM.
 type MDRun struct {
-	CNI               MDRunCNI             `json:"cni"`
-	Configs           MDRunConfigs         `json:"configs"`
-	Drives            []models.Drive       `json:"drivers"`
-	Hostname          string               `json:"hostname"`
-	IdentityFile      string               `json:"identity-file"`
-	NetworkInterfaces []MDNetworkInterafce `json:"network-interfaces"`
-	PID               pid.RunningVMMPID    `json:"pid"`
-	Rootfs            *MDRootfs            `json:"rootfs"`
-	RunCache          string               `json:"run-cache"`
-	StartedAtUTC      int64                `json:"started-at-utc"`
-	VMMID             string               `json:"vmm-id"`
-	Type              Type                 `json:"type"`
+	CNI               MDRunCNI             `json:"cni" mapstructure:"cni"`
+	Configs           MDRunConfigs         `json:"configs" mapstructure:"configs"`
+	Drives            []models.Drive       `json:"drivers" mapstructure:"drives"`
+	NetworkInterfaces []MDNetworkInterafce `json:"network-interfaces" mapstructure:"network-interfaces"`
+	PID               pid.RunningVMMPID    `json:"pid" mapstructure:"pid"`
+	Rootfs            *MDRootfs            `json:"rootfs" mapstructure:"rootfs"`
+	RunCache          string               `json:"run-cache" mapstructure:"run-cache"`
+	StartedAtUTC      int64                `json:"started-at-utc" mapstructure:"started-at-utc"`
+	VMMID             string               `json:"vmm-id" mapstructure:"vmm-id"`
+	Type              Type                 `json:"type" mapstructure:"type"`
+}
+
+func (r *MDRun) AsMMDS() (interface{}, error) {
+
+	env, err := r.Configs.RunConfig.MergedEnvironment()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed fetching merged env")
+	}
+	keys, err := r.Configs.RunConfig.PublicKeys()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed fetching public keys")
+	}
+
+	metadata := &MMDSLatest{
+		Latest: &MMDSLatestMetadata{
+			Metadata: &MMDSData{
+				VMMID:             r.VMMID,
+				Drives:            r.Drives,
+				Env:               env,
+				Hostname:          r.Configs.RunConfig.Hostname,
+				MachineConfig:     r.Configs.Machine,
+				NetworkInterfaces: r.NetworkInterfaces,
+				Rootfs:            r.Rootfs,
+				SSHKeys: func() []string {
+					resp := []string{}
+					for _, key := range keys {
+						resp = append(resp, string(utils.MarshalSSHPublicKey(key)))
+					}
+					return resp
+				}(),
+			},
+		},
+	}
+	return metadata.Serialize()
 }
 
 // FcNetworkInterfacesToMetadata converts firecracker network interfaces to the metadata network interfaces.

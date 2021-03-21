@@ -5,6 +5,8 @@ import (
 	"os"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
@@ -135,7 +137,7 @@ type RunCommandConfig struct {
 	EnvFiles               []string
 	EnvVars                map[string]string
 	From                   string
-	IdentityFile           string
+	IdentityFiles          []string
 	Hostname               string
 }
 
@@ -152,7 +154,7 @@ func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringArrayVar(&c.EnvFiles, "env-file", []string{}, "Full path to an environment file to apply to the VMM during bootstrap, multiple OK")
 		c.flagSet.StringToStringVar(&c.EnvVars, "env", map[string]string{}, "Additional environment variables to apply to the VMM during bootstrap, multiple OK")
 		c.flagSet.StringVar(&c.From, "from", "", "The image to launch from, for example: tests/postgres:13")
-		c.flagSet.StringVar(&c.IdentityFile, "identity-file", "", "Full path to the SSH public key to deploy to the machine during bootstrap, must be regular file")
+		c.flagSet.StringArrayVar(&c.IdentityFiles, "identity-file", []string{}, "Full path to the SSH public key to deploy to the machine during bootstrap, must be regular file, multiple OK")
 		c.flagSet.StringVar(&c.Hostname, "hostname", "", "Hostname to apply to the VMM during bootstrap; if empty, a random name will be assigned")
 	}
 	return c.flagSet
@@ -183,6 +185,19 @@ func (c *RunCommandConfig) MergedEnvironment() (map[string]string, error) {
 		env[k] = v
 	}
 	return env, nil
+}
+
+// PublicKeys returns an array of ssh.PublicKey obtainer from identity files.
+func (c *RunCommandConfig) PublicKeys() ([]ssh.PublicKey, error) {
+	keys := []ssh.PublicKey{}
+	for _, identityFile := range c.IdentityFiles {
+		sshPublicKey, readErr := utils.SSHPublicKeyFromFile(identityFile)
+		if readErr != nil {
+			return keys, readErr
+		}
+		keys = append(keys, sshPublicKey)
+	}
+	return keys, nil
 }
 
 // Validate validates the correctness of the configuration.

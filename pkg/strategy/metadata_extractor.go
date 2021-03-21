@@ -29,18 +29,31 @@ func NewMetadataExtractorHandler(logger hclog.Logger, md *metadata.MDRun) firecr
 				}
 			}
 
+			setMetadata := false
+
 			if cniIface != nil {
 				md.CNI = metadata.MDRunCNI{
 					NetName:       cniIface.CNIConfiguration.NetworkName,
 					NetNS:         m.Cfg.NetNS,
 					VethIfaceName: cniIface.CNIConfiguration.IfName,
 				}
+				setMetadata = true
 			}
 
 			md.StartedAtUTC = time.Now().UTC().Unix()
 			md.Drives = m.Cfg.Drives
 			md.NetworkInterfaces = metadata.FcNetworkInterfacesToMetadata(m.Cfg.NetworkInterfaces)
 			md.VMMID = m.Cfg.VMID
+
+			if setMetadata {
+				serializedMetadata, err := md.AsMMDS()
+				if err != nil {
+					logger.Error("error while serializing metadata to mmds metadata", "reason", err)
+					return err
+				}
+				logger.Trace("mmds enabled, setting mmds metadata", "metadata", serializedMetadata)
+				m.SetMetadata(ctx, serializedMetadata)
+			}
 
 			return nil
 		},

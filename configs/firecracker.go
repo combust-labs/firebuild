@@ -57,7 +57,7 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 		MetricsFifo:     "",      // not configurable for the build machines
 		FifoLogWriter:   fifo,
 		KernelImagePath: c.machineConfig.KernelOverride(),
-		KernelArgs:      c.machineConfig.MachineKernelArgs,
+		KernelArgs:      c.machineConfig.KernelArgs,
 		NetNS:           c.jailingFcConfig.NetNS,
 		Drives: []models.Drive{
 			{
@@ -65,21 +65,22 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 				PathOnHost:   firecracker.String(c.machineConfig.RootfsOverride()),
 				IsRootDevice: firecracker.Bool(true),
 				IsReadOnly:   firecracker.Bool(false),
-				Partuuid:     c.machineConfig.MachineRootDrivePartUUID,
+				Partuuid:     c.machineConfig.RootDrivePartUUID,
 			},
 		},
 		NetworkInterfaces: []firecracker.NetworkInterface{{
+			AllowMMDS: c.machineConfig.MMDS,
 			CNIConfiguration: &firecracker.CNIConfiguration{
-				NetworkName: c.machineConfig.MachineCNINetworkName,
+				NetworkName: c.machineConfig.CNINetworkName,
 				IfName:      c.vethIfaceName,
 			},
 		}},
 		VsockDevices: []firecracker.VsockDevice{},
 		MachineCfg: models.MachineConfiguration{
-			VcpuCount:   firecracker.Int64(c.machineConfig.ResourcesCPU),
-			CPUTemplate: models.CPUTemplate(c.machineConfig.MachineCPUTemplate),
-			HtEnabled:   firecracker.Bool(c.machineConfig.MachineHTEnabled),
-			MemSizeMib:  firecracker.Int64(c.machineConfig.ResourcesMem),
+			VcpuCount:   firecracker.Int64(c.machineConfig.CPU),
+			CPUTemplate: models.CPUTemplate(c.machineConfig.CPUTemplate),
+			HtEnabled:   firecracker.Bool(c.machineConfig.HTEnabled),
+			MemSizeMib:  firecracker.Int64(c.machineConfig.Mem),
 		},
 		JailerCfg: &firecracker.JailerConfig{
 			GID:           firecracker.Int(c.jailingFcConfig.JailerGID),
