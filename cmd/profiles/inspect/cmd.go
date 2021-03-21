@@ -78,7 +78,7 @@ func processCommand() int {
 		return 1
 	}
 
-	bytes, jsonErr := json.MarshalIndent(profile, "", "  ")
+	bytes, jsonErr := json.MarshalIndent(profile.Profile(), "", "  ")
 	if jsonErr != nil {
 		rootLogger.Error("profile inspect failed", "reason", jsonErr)
 		return 1
