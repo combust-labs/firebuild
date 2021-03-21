@@ -200,30 +200,6 @@ func (c *RunCommandConfig) PublicKeys() ([]ssh.PublicKey, error) {
 	return keys, nil
 }
 
-// ToMMDS converts the command config to MMDS compatible config.
-func (c *RunCommandConfig) ToMMDS() (interface{}, error) {
-
-	output := map[string]interface{}{}
-
-	keys, err := c.PublicKeys()
-	if err != nil {
-		return nil, err
-	}
-	env, err := c.MergedEnvironment()
-	if err != nil {
-		return nil, err
-	}
-
-	stringKeys := []string{}
-	for _, key := range keys {
-		stringKeys = append(stringKeys, string(utils.MarshalSSHPublicKey(key)))
-	}
-	output["ssh_auhorized_keys"] = stringKeys
-	output["hostname"] = c.Hostname
-	output["env"] = env
-	return output, nil
-}
-
 // Validate validates the correctness of the configuration.
 func (c *RunCommandConfig) Validate() error {
 	for _, envFile := range c.EnvFiles {
