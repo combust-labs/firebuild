@@ -117,7 +117,7 @@ sudo /usr/local/go/bin/go run ./main.go rootfs \
     --vmlinux-id=vmlinux-v5.8 \
     --pre-build-command='chmod 1777 /tmp' \
     --log-as-json \
-    --resources-mem=512 \
+    --mem=512 \
     --tag=tests/postgres:13
 ```
 

@@ -1,6 +1,6 @@
 FROM alpine:3.12
 ADD https://github.com/combust-labs/firebuild-mmds/releases/download/v0.0.2/vminit-linux /usr/bin/vminit
-ADD vminit-svc etc/init.d/vminit-svc
+ADD vminit-svc /etc/init.d/vminit-svc
 RUN chmod +x /usr/bin/vminit \
 	&& apk update \
 	&& apk add openrc openssh sudo util-linux \
