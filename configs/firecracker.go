@@ -69,7 +69,7 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 			},
 		},
 		NetworkInterfaces: []firecracker.NetworkInterface{{
-			AllowMMDS: c.machineConfig.MMDS,
+			AllowMMDS: !c.machineConfig.NoMMDS,
 			CNIConfiguration: &firecracker.CNIConfiguration{
 				NetworkName: c.machineConfig.CNINetworkName,
 				IfName:      c.vethIfaceName,

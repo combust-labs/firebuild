@@ -14,7 +14,7 @@ type MachineConfig struct {
 	HTEnabled             bool   `json:"ht-enabled" mapstructure:"ht-enabled"`
 	KernelArgs            string `json:"kernel-args" mapstructure:"kernel-args"`
 	Mem                   int64  `json:"mem" mapstructure:"mem"`
-	MMDS                  bool   `json:"mmds" mapstructure:"mmds"`
+	NoMMDS                bool   `json:"no-mmds" mapstructure:"no-mmds"`
 	RootDrivePartUUID     string `json:"root-drive-partuuid" mapstructure:"root-drive-partuuid"`
 	SSHEnableAgentForward bool   `json:"ssh-enable-agent-forward" mapstructure:"ssh-enable-agent-forward"`
 	SSHPort               int    `json:"ssh-port" mapstructure:"ssh-port"`
@@ -47,7 +47,7 @@ func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.BoolVar(&c.HTEnabled, "ht-enabled", false, "When specified, enable hyper-threading")
 		c.flagSet.StringVar(&c.KernelArgs, "kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
 		c.flagSet.Int64Var(&c.Mem, "mem", 128, "Amount of memory for the VMM")
-		c.flagSet.BoolVar(&c.MMDS, "mmds", false, "If set, enables MMDS")
+		c.flagSet.BoolVar(&c.NoMMDS, "mmds", false, "If set, disables MMDS")
 		c.flagSet.StringVar(&c.RootDrivePartUUID, "root-drive-partuuid", "", "Root drive part UUID")
 		c.flagSet.BoolVar(&c.SSHEnableAgentForward, "ssh-enable-agent-forward", false, "If set, enables SSH agent forward")
 		c.flagSet.StringVar(&c.SSHAuthorizedKeysFile, "ssh-authorized-keys-file", "", "SSH authorized keys file in the machine root file system; if empty, /home/{ssh-user}/.ssh/authorized_keys is asumed")
