@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/combust-labs/firebuild-mmds/mmds"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/build"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
@@ -493,7 +494,6 @@ func processCommand() int {
 
 	if buildErr := buildContext.
 		WithLogger(vmmLogger.Named("builder")).
-		WithServiceInstaller(commandConfig.ServiceFileInstaller).
 		WithPostBuildCommands(postBuildCommands...).
 		WithPreBuildCommands(preBuildCommands...).
 		WithDependencyResources(dependencyResources).
@@ -525,6 +525,8 @@ func processCommand() int {
 		return 1
 	}
 
+	buildEntrypointInfo := buildContext.EntrypointInfo()
+
 	fsFileName := filepath.Base(machineConfig.RootfsOverride())
 	createdRootfsFile := filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root", fsFileName)
 	storeResult, storeErr := storageImpl.StoreRootfsFile(&storage.RootfsStore{
@@ -537,6 +539,14 @@ func processCommand() int {
 				PostBuildCommands: commandConfig.PostBuildCommands,
 			},
 			CreatedAtUTC: time.Now().UTC().Unix(),
+			EntrypointInfo: &mmds.MMDSRootfsEntrypointInfo{
+				Cmd:        buildEntrypointInfo.Cmd.Values,
+				Entrypoint: buildEntrypointInfo.Entrypoint.Values,
+				Env:        buildEntrypointInfo.Entrypoint.Env,
+				Shell:      buildEntrypointInfo.Entrypoint.Shell.Commands,
+				User:       buildEntrypointInfo.Entrypoint.User.Value,
+				Workdir:    buildEntrypointInfo.Entrypoint.Workdir.Value,
+			},
 			Image: metadata.MDImage{
 				Org:     org,
 				Image:   name,

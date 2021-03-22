@@ -66,8 +66,8 @@ func (cmd Arg) Value() (string, bool) {
 
 // Cmd represents the CMD instruction.
 type Cmd struct {
-	OriginalCommand string
-	Values          []string
+	OriginalCommand string   `json:"-" mapstructure:"-"`
+	Values          []string `json:"values" mapstructure:"values"`
 }
 
 func (cmd Cmd) GetOriginal() string {
@@ -92,12 +92,12 @@ func (cmd Copy) GetOriginal() string {
 
 // Entrypoint represents the ENTRYPOINT instruction.
 type Entrypoint struct {
-	OriginalCommand string
-	Values          []string
-	Env             map[string]string
-	Shell           Shell
-	Workdir         Workdir
-	User            User
+	OriginalCommand string            `json:"-" mapstructure:"-"`
+	Values          []string          `json:"values" mapstructure:"values"`
+	Env             map[string]string `json:"env" mapstructure:"env"`
+	Shell           Shell             `json:"shell" mapstructure:"shell"`
+	Workdir         Workdir           `json:"workdir" mapstructure:"workdir"`
+	User            User              `json:"user" mapstructure:"user"`
 }
 
 func (cmd Entrypoint) GetOriginal() string {
@@ -200,8 +200,8 @@ func (cmd Run) GetOriginal() string {
 
 // Shell represents the SHELL instruction.
 type Shell struct {
-	OriginalCommand string
-	Commands        []string
+	OriginalCommand string   `json:"-" mapstructure:"-"`
+	Commands        []string `json:"commands" mapstructure:"commands"`
 }
 
 func (cmd Shell) GetOriginal() string {
@@ -210,8 +210,8 @@ func (cmd Shell) GetOriginal() string {
 
 // User represents the USER instruction.
 type User struct {
-	OriginalCommand string
-	Value           string
+	OriginalCommand string `json:"-" mapstructure:"-"`
+	Value           string `json:"value" mapstructure:"value"`
 }
 
 func (cmd User) GetOriginal() string {
@@ -228,8 +228,8 @@ type Volume struct {
 
 // Workdir represents the WORKDIR instruction.
 type Workdir struct {
-	OriginalCommand string
-	Value           string
+	OriginalCommand string `json:"-" mapstructure:"-"`
+	Value           string `json:"value" mapstructure:"value"`
 }
 
 func (cmd Workdir) GetOriginal() string {

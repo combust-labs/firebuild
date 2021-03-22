@@ -101,12 +101,11 @@ func (c *InspectCommandConfig) Validate() error {
 type RootfsCommandConfig struct {
 	flagBase
 
-	BuildArgs            map[string]string
-	Dockerfile           string
-	PostBuildCommands    []string
-	PreBuildCommands     []string
-	ServiceFileInstaller string
-	Tag                  string
+	BuildArgs         map[string]string
+	Dockerfile        string
+	PostBuildCommands []string
+	PreBuildCommands  []string
+	Tag               string
 }
 
 // NewRootfsCommandConfig returns new command configuration.
@@ -121,7 +120,6 @@ func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
 		c.flagSet.StringArrayVar(&c.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
 		c.flagSet.StringArrayVar(&c.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
-		c.flagSet.StringVar(&c.ServiceFileInstaller, "service-file-installer", "", "Local path to the program to upload to the VMM and install the service file")
 		c.flagSet.StringVar(&c.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
 	}
 	return c.flagSet

@@ -1,9 +1,13 @@
 FROM debian:buster-slim
-ADD https://github.com/combust-labs/firebuild-mmds/releases/download/v0.0.2/vminit-linux /usr/bin/vminit
+
+ARG VMINIT_URI=https://github.com/combust-labs/firebuild-mmds/releases/download
+ARG VMINIT_VERSION=0.0.5
+ADD ${VMINIT_URI}/v${VMINIT_VERSION}/vminit-linux-amd64-${VMINIT_VERSION} /usr/bin/vminit
+
 ADD vminit-svc.sh /etc/init.d/vminit-svc.sh
 RUN chmod +x /usr/bin/vminit \
 	&& apt-get update \
-	&& apt-get install -y --no-install-recommends gnupg iputils-ping openssh-server sudo sysvinit-core util-linux \
+	&& apt-get install -y --no-install-recommends gnupg iputils-ping openssh-server procps sudo sysvinit-core util-linux \
 	&& ssh-keygen -A \
 	&& mkdir -p /home/debian/.ssh \
 	&& touch /home/debian/.ssh/authorized_keys \

@@ -204,7 +204,7 @@ func processCommand() int {
 	spanRootfsMetadata := tracer.StartSpan("run-rootfs-metadata", opentracing.ChildOf(spanResolveRootfs.Context()))
 
 	// the metadata here must be MDRootfs:
-	mdRootfs, unwrapErr := metadata.MDRootfsFromInterface(resolvedRootfs.Metadata().(map[string]interface{}))
+	mdRootfs, unwrapErr := metadata.MDRootfsFromInterface(resolvedRootfs.Metadata())
 	if unwrapErr != nil {
 		rootLogger.Error("failed unwrapping metadata", "reason", unwrapErr)
 		spanRootfsMetadata.SetBaggageItem("error", unwrapErr.Error())
