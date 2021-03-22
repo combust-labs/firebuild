@@ -37,7 +37,7 @@ func NewMetadataExtractorHandler(logger hclog.Logger, md *metadata.MDRun) firecr
 					NetNS:         m.Cfg.NetNS,
 					VethIfaceName: cniIface.CNIConfiguration.IfName,
 				}
-				setMetadata = true
+				setMetadata = cniIface.AllowMMDS
 			}
 
 			md.StartedAtUTC = time.Now().UTC().Unix()

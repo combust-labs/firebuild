@@ -264,7 +264,7 @@ func processCommand() int {
 
 	vmmStrategy := configs.DefaultFirectackerStrategy(machineConfig)
 
-	if !commandConfig.DisablePseudoCloudInit {
+	if commandConfig.EnableFileBasedInit {
 		vmmEnvironment, envErr := commandConfig.MergedEnvironment()
 		if envErr != nil {
 			rootLogger.Error("failed merging environment", "reason", envErr)

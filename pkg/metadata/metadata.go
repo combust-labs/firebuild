@@ -1,6 +1,10 @@
 package metadata
 
 import (
+	"fmt"
+	"strings"
+
+	"github.com/combust-labs/firebuild-mmds/mmds"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/combust-labs/firebuild/pkg/vmm/pid"
@@ -53,7 +57,7 @@ type MDNetStaticConfiguration struct {
 	HostDevName string `json:"host-dev-name" mapstructure:"host-dev-name"`
 	// IPConfiguration (optional) allows a static IP, gateway and up to 2 DNS nameservers
 	// to be automatically configured within the VM upon startup.
-	IPConfiguration *MDNetIPConfiguration `json:"ip-configuration" mapstructure:"ip=configuration"`
+	IPConfiguration *MDNetIPConfiguration `json:"ip-configuration" mapstructure:"ip-configuration"`
 }
 
 // MDNetworkInterafce is network interface configuration of a running VMM.
@@ -135,22 +139,68 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 		return nil, errors.Wrap(err, "failed fetching public keys")
 	}
 
-	metadata := &MMDSLatest{
-		Latest: &MMDSLatestMetadata{
-			Metadata: &MMDSData{
-				VMMID:             r.VMMID,
-				Drives:            r.Drives,
-				Env:               env,
-				Hostname:          r.Configs.RunConfig.Hostname,
-				MachineConfig:     r.Configs.Machine,
-				NetworkInterfaces: r.NetworkInterfaces,
-				Rootfs:            r.Rootfs,
-				SSHKeys: func() []string {
-					resp := []string{}
-					for _, key := range keys {
-						resp = append(resp, string(utils.MarshalSSHPublicKey(key)))
+	metadata := &mmds.MMDSLatest{
+		Latest: &mmds.MMDSLatestMetadata{
+			Metadata: &mmds.MMDSData{
+				VMMID: r.VMMID,
+				Drives: func() map[string]*mmds.MMDSDrive {
+					result := map[string]*mmds.MMDSDrive{}
+					for _, drive := range r.Drives {
+						result[*drive.DriveID] = &mmds.MMDSDrive{
+							DriveID:      *drive.DriveID,
+							IsReadOnly:   fmt.Sprintf("%v", *drive.IsReadOnly),
+							IsRootDevice: fmt.Sprintf("%v", *drive.IsRootDevice),
+							Partuuid:     drive.Partuuid,
+							PathOnHost:   *drive.PathOnHost,
+						}
 					}
-					return resp
+					return result
+				}(),
+				Env:           env,
+				LocalHostname: r.Configs.RunConfig.Hostname,
+				Machine: &mmds.MMDSMachine{
+					CPU:         fmt.Sprintf("%d", r.Configs.Machine.CPU),
+					CPUTemplate: r.Configs.Machine.CPUTemplate,
+					HTEnabled:   fmt.Sprintf("%v", r.Configs.Machine.HTEnabled),
+					KernelArgs:  r.Configs.Machine.KernelArgs,
+					Mem:         fmt.Sprintf("%d", r.Configs.Machine.Mem),
+					VMLinuxID:   r.Configs.Machine.VMLinuxID,
+				},
+				Network: &mmds.MMDSNetwork{
+					CNINetworkName: r.Configs.Machine.CNINetworkName,
+					Interfaces: func() map[string]*mmds.MMDSNetworkInterface {
+						result := map[string]*mmds.MMDSNetworkInterface{}
+						for _, nic := range r.NetworkInterfaces {
+							result[nic.StaticConfiguration.MacAddress] = &mmds.MMDSNetworkInterface{
+								HostDevName: nic.StaticConfiguration.HostDevName,
+								Gateway:     nic.StaticConfiguration.IPConfiguration.Gateway,
+								IfName:      nic.StaticConfiguration.IPConfiguration.IfName,
+								IP:          nic.StaticConfiguration.IPConfiguration.IP,
+								IPAddr:      nic.StaticConfiguration.IPConfiguration.IPAddr,
+								IPMask:      nic.StaticConfiguration.IPConfiguration.IPMask,
+								IPNet:       nic.StaticConfiguration.IPConfiguration.IPNet,
+								Nameservers: strings.Join(nic.StaticConfiguration.IPConfiguration.Nameservers, ","),
+							}
+						}
+						return result
+					}(),
+					SSHPort: fmt.Sprintf("%d", r.Configs.Machine.SSHPort),
+				},
+				ImageTag: r.Rootfs.Tag,
+				Users: func() map[string]*mmds.MMDSUser {
+					result := map[string]*mmds.MMDSUser{}
+					if r.Configs.Machine.SSHUser != "" {
+						result[r.Configs.Machine.SSHUser] = &mmds.MMDSUser{
+							SSHKeys: func() string {
+								resp := []string{}
+								for _, key := range keys {
+									resp = append(resp, string(utils.MarshalSSHPublicKey(key)))
+								}
+								return strings.Join(resp, "\n")
+							}(),
+						}
+					}
+					return result
 				}(),
 			},
 		},

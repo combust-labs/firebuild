@@ -1,4 +1,4 @@
-FROM alpine:3.13
+FROM alpine:3.11
 ADD https://github.com/combust-labs/firebuild-mmds/releases/download/v0.0.2/vminit-linux /usr/bin/vminit
 ADD vminit-svc /etc/init.d/vminit-svc
 RUN chmod +x /usr/bin/vminit \
@@ -16,8 +16,8 @@ RUN chmod +x /usr/bin/vminit \
 	&& chmod 0400 /home/alpine/.ssh/authorized_keys \
 	&& mkdir -p /run/openrc \
 	&& touch /run/openrc/softlevel \
-	&& echo ttyS0 > /etc/securetty \
 	&& ln -s agetty /etc/init.d/agetty.ttyS0 \
+	&& echo ttyS0 > /etc/securetty \
 	&& chmod +x etc/init.d/vminit-svc \
 	&& rc-update add vminit-svc default \
 	&& rc-update add agetty.ttyS0 default \

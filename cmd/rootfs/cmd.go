@@ -79,6 +79,8 @@ func run(cobraCommand *cobra.Command, _ []string) {
 
 func processCommand() int {
 
+	machineConfig.NoMMDS = true // TODO: find a better method
+
 	cleanup := utils.NewDefers()
 	defer cleanup.CallAll()
 
