@@ -3,7 +3,7 @@ module github.com/combust-labs/firebuild
 go 1.16
 
 require (
-	github.com/combust-labs/firebuild-mmds v0.0.1
+	github.com/combust-labs/firebuild-mmds v0.0.3
 	github.com/containernetworking/cni v0.8.0
 	github.com/docker/docker v20.10.4+incompatible
 	github.com/firecracker-microvm/firecracker-go-sdk v0.22.0
@@ -17,7 +17,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/pkg/sftp v1.12.0
 	github.com/sirupsen/logrus v1.7.0
-	github.com/spf13/cobra v1.0.0
+	github.com/spf13/cobra v1.1.3
 	github.com/spf13/pflag v1.0.5
 	github.com/subosito/gotenv v1.2.0
 	github.com/uber/jaeger-client-go v2.25.0+incompatible

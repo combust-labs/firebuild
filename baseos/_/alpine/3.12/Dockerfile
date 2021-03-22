@@ -1,5 +1,9 @@
 FROM alpine:3.12
-ADD https://github.com/combust-labs/firebuild-mmds/releases/download/v0.0.2/vminit-linux /usr/bin/vminit
+
+ARG VMINIT_URI=https://github.com/combust-labs/firebuild-mmds/releases/download
+ARG VMINIT_VERSION=0.0.4
+ADD ${VMINIT_URI}/v${VMINIT_VERSION}/vminit-linux-amd64-${VMINIT_VERSION} /usr/bin/vminit
+
 ADD vminit-svc /etc/init.d/vminit-svc
 RUN chmod +x /usr/bin/vminit \
 	&& apk update \

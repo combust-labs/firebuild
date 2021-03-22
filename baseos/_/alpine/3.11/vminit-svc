@@ -1,4 +1,51 @@
 #!/sbin/openrc-run
-command="/usr/bin/vminit"
-command_args=""
-pidfile="/run/vminit.pid"
+# Copyright 2021 Radoslaw Gruchalski
+# $Header: $
+
+name="vminit"
+pidfile="/var/run/firebuild-entrypoint.pid"
+
+depend() {
+        after localmount
+}
+
+start() {
+        ebegin "Starting ${name}"
+
+        # init from MMDS
+        /usr/bin/vminit
+        
+        # find what is the firebuild executor file:
+        executor=$(/usr/bin/vminit --print-flags | /bin/grep path-entrypoint-runner-file | /usr/bin/awk '{print $2}')
+
+        # if there is an executor:
+        if [ -f "${executor}" ]; then
+                # run it and log to the file:
+                ("${executor}" >/var/log/firebuild-entrypoint.log 2>&1)&
+                # get the pid of the subshell:
+                mypid=$!
+                # write the pid to the file:
+                /bin/echo ${mypid} > "${pidfile}"
+        fi
+        eend
+}
+
+stop() {
+        ebegin "Stopping ${name}"
+        if [ -f "${pidfile}" ]; then
+                # read the pid from file:
+                mainpid=$(/bin/cat "${pidfile}")
+
+                # if any process has been started by the main process, stop it:
+                for subpid in $(/usr/bin/pgrep -P ${mainpid}); do
+                        /bin/kill ${subpid}
+                done
+
+                # stop the main process:
+                /bin/kill $mainpid
+
+                # remove the pid file:
+                /bin/rm "${pidfile}"
+        fi
+        eend
+}

@@ -78,15 +78,16 @@ type MDRootfsConfig struct {
 
 // MDRootfs represents a metadata of the rootfs.
 type MDRootfs struct {
-	BuildConfig  MDRootfsConfig    `json:"build-config" mapstructure:"build-config"`
-	CreatedAtUTC int64             `json:"created-at-utc" mapstructure:"created-at-utc"`
-	Image        MDImage           `json:"image" mapstructure:"image"`
-	Labels       map[string]string `json:"labels" mapstructure:"labels"`
-	Parent       interface{}       `json:"parent" mapstructure:"parent"`
-	Ports        []string          `json:"ports" mapstructure:"ports"`
-	Tag          string            `json:"tag" mapstructure:"tag"`
-	Type         Type              `json:"type" mapstructure:"type"`
-	Volumes      []string          `json:"volumes" mapstructure:"volumes"`
+	BuildConfig    MDRootfsConfig                 `json:"build-config" mapstructure:"build-config"`
+	CreatedAtUTC   int64                          `json:"created-at-utc" mapstructure:"created-at-utc"`
+	EntrypointInfo *mmds.MMDSRootfsEntrypointInfo `json:"entrypoint-info" mapstructure:"entrypoint-info"`
+	Image          MDImage                        `json:"image" mapstructure:"image"`
+	Labels         map[string]string              `json:"labels" mapstructure:"labels"`
+	Parent         interface{}                    `json:"parent" mapstructure:"parent"`
+	Ports          []string                       `json:"ports" mapstructure:"ports"`
+	Tag            string                         `json:"tag" mapstructure:"tag"`
+	Type           Type                           `json:"type" mapstructure:"type"`
+	Volumes        []string                       `json:"volumes" mapstructure:"volumes"`
 }
 
 // MDRootfsFromInterface unwraps an interface{} as *MDRootfs.
@@ -139,6 +140,11 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 		return nil, errors.Wrap(err, "failed fetching public keys")
 	}
 
+	entrypointJson, err := r.Rootfs.EntrypointInfo.ToJsonString()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed fetching public keys")
+	}
+
 	metadata := &mmds.MMDSLatest{
 		Latest: &mmds.MMDSLatestMetadata{
 			Metadata: &mmds.MMDSData{
@@ -156,8 +162,9 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 					}
 					return result
 				}(),
-				Env:           env,
-				LocalHostname: r.Configs.RunConfig.Hostname,
+				EntrypointJSON: entrypointJson,
+				Env:            env,
+				LocalHostname:  r.Configs.RunConfig.Hostname,
 				Machine: &mmds.MMDSMachine{
 					CPU:         fmt.Sprintf("%d", r.Configs.Machine.CPU),
 					CPUTemplate: r.Configs.Machine.CPUTemplate,
