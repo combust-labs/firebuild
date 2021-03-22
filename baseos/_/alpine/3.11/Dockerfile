@@ -1,4 +1,4 @@
-FROM alpine:3.12
+FROM alpine:3.11
 ADD https://github.com/combust-labs/firebuild-mmds/releases/download/v0.0.2/vminit-linux /usr/bin/vminit
 ADD vminit-svc etc/init.d/vminit-svc
 RUN chmod +x /usr/bin/vminit \

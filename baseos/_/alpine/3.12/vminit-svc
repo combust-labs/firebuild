@@ -1,0 +1,4 @@
+#!/sbin/openrc-run
+command="/usr/bin/vminit"
+command_args=""
+pidfile="/run/vminit.pid"
