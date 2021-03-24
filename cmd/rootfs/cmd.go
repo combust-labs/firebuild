@@ -213,18 +213,27 @@ func processCommand() int {
 		rootLogger.Warn("stages read contained an error", "reason", err)
 	}
 
-	unnamed := scs.Unnamed()
-	if len(unnamed) != 1 {
-		rootLogger.Error("expected exactly one unnamed build stage but found", "num-unnamed", len(unnamed))
-		spanReadStages.SetBaggageItem("error", "unnamed stages count must be 1")
-		spanReadStages.Finish()
-		return 1
-	}
+	stageToBuild, stageResolveError := func() (stage.Stage, error) {
+		if commandConfig.DockerfileStage == "" {
+			unnamed := scs.Unnamed()
+			if len(unnamed) != 1 {
+				return nil, fmt.Errorf("unnamed stages count must be 1 when no build stage is specified")
+			}
+			if !unnamed[0].IsValid() {
+				return nil, fmt.Errorf("main build stage invalid: no base to build from")
+			}
+			return unnamed[0], nil
+		}
+		namedStage := scs.NamedStage(commandConfig.DockerfileStage)
+		if namedStage == nil {
+			return nil, fmt.Errorf("no stage named %q", commandConfig.DockerfileStage)
+		}
+		return namedStage, nil
+	}()
 
-	mainStage := unnamed[0]
-	if !mainStage.IsValid() {
-		rootLogger.Error("main build stage invalid: no base to build from")
-		spanReadStages.SetBaggageItem("error", "main build stage is invalid")
+	if stageResolveError != nil {
+		rootLogger.Error(stageResolveError.Error())
+		spanReadStages.SetBaggageItem("error", stageResolveError.Error())
 		spanReadStages.Finish()
 		return 1
 	}
@@ -235,7 +244,7 @@ func processCommand() int {
 
 	// The first thing to do is to resolve the Dockerfile:
 	buildContext := build.NewDefaultBuild()
-	if err := buildContext.AddInstructions(unnamed[0].Commands()...); err != nil {
+	if err := buildContext.AddInstructions(stageToBuild.Commands()...); err != nil {
 		rootLogger.Error("commands could not be processed", "reason", err)
 		spanBuildContext.SetBaggageItem("error", err.Error())
 		spanBuildContext.Finish()
