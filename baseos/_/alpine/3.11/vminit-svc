@@ -21,7 +21,7 @@ start() {
         # if there is an executor:
         if [ -f "${executor}" ]; then
                 # run it and log to the file:
-                ("${executor}" >/var/log/firebuild-entrypoint.log 2>&1)&
+                (export PATH=$PATH:/sbin:/bin:/usr/bin:/usr/local/bin; "${executor}" >/var/log/firebuild-entrypoint.log 2>&1)&
                 # get the pid of the subshell:
                 mypid=$!
                 # write the pid to the file:
