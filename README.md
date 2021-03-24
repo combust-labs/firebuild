@@ -338,5 +338,4 @@ Unless explcitly stated: AGPL-3.0 License.
 
 Excluded from the license:
 
-- `build/env/expand.go`: sourced from golang standard library
 - `remote/scp.go`: sourced from Terraform SSH communicator

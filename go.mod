@@ -19,6 +19,7 @@ require (
 	github.com/sirupsen/logrus v1.7.0
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/pflag v1.0.5
+	github.com/stretchr/testify v1.6.1
 	github.com/subosito/gotenv v1.2.0
 	github.com/uber/jaeger-client-go v2.25.0+incompatible
 	golang.org/x/crypto v0.0.0-20201117144127-c1f2f97bffc9
