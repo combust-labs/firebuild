@@ -103,6 +103,7 @@ type RootfsCommandConfig struct {
 
 	BuildArgs         map[string]string
 	Dockerfile        string
+	DockerfileStage   string
 	PostBuildCommands []string
 	PreBuildCommands  []string
 	Tag               string
@@ -118,6 +119,7 @@ func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.StringToStringVar(&c.BuildArgs, "build-arg", map[string]string{}, "Build arguments, Multiple OK")
 		c.flagSet.StringVar(&c.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
+		c.flagSet.StringVar(&c.DockerfileStage, "dockerfile-stage", "", "The Dockerfile stage name to build from")
 		c.flagSet.StringArrayVar(&c.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
 		c.flagSet.StringArrayVar(&c.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
 		c.flagSet.StringVar(&c.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
