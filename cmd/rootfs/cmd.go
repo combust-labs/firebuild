@@ -42,16 +42,15 @@ var Command = &cobra.Command{
 }
 
 var (
-	cniConfig        = configs.NewCNIConfig()
-	commandConfig    = configs.NewRootfsCommandConfig()
-	egressTestConfig = configs.NewEgressTestConfig()
-	jailingFcConfig  = configs.NewJailingFirecrackerConfig()
-	logConfig        = configs.NewLogginConfig()
-	machineConfig    = configs.NewMachineConfig()
-	profilesConfig   = configs.NewProfileCommandConfig()
-	runCache         = configs.NewRunCacheConfig()
-	tracingConfig    = configs.NewTracingConfig("firebuild-rootfs")
-	rsaKeySize       = 4096
+	cniConfig       = configs.NewCNIConfig()
+	commandConfig   = configs.NewRootfsCommandConfig()
+	jailingFcConfig = configs.NewJailingFirecrackerConfig()
+	logConfig       = configs.NewLogginConfig()
+	machineConfig   = configs.NewMachineConfig()
+	profilesConfig  = configs.NewProfileCommandConfig()
+	runCache        = configs.NewRunCacheConfig()
+	tracingConfig   = configs.NewTracingConfig("firebuild-rootfs")
+	rsaKeySize      = 4096
 
 	storageResolver = resolver.NewDefaultResolver()
 )
@@ -59,7 +58,6 @@ var (
 func initFlags() {
 	Command.Flags().AddFlagSet(cniConfig.FlagSet())
 	Command.Flags().AddFlagSet(commandConfig.FlagSet())
-	Command.Flags().AddFlagSet(egressTestConfig.FlagSet())
 	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
@@ -79,8 +77,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 }
 
 func processCommand() int {
-
-	machineConfig.NoMMDS = true // TODO: find a better method
 
 	cleanup := utils.NewDefers()
 	defer cleanup.CallAll()
@@ -243,15 +239,15 @@ func processCommand() int {
 	spanBuildContext := tracer.StartSpan("rootfs-build-context", opentracing.ChildOf(spanReadStages.Context()))
 
 	// The first thing to do is to resolve the Dockerfile:
-	buildContext := build.NewDefaultBuild()
-	if err := buildContext.AddInstructions(stageToBuild.Commands()...); err != nil {
+	contextBuilder := build.NewDefaultBuild()
+	if err := contextBuilder.AddInstructions(stageToBuild.Commands()...); err != nil {
 		rootLogger.Error("commands could not be processed", "reason", err)
 		spanBuildContext.SetBaggageItem("error", err.Error())
 		spanBuildContext.Finish()
 		return 1
 	}
 
-	structuredFrom := buildContext.From().ToStructuredFrom()
+	structuredFrom := contextBuilder.From().ToStructuredFrom()
 
 	// which resources from dependencies do we need:
 	requiredCopies := []commands.Copy{}
@@ -457,39 +453,6 @@ func processCommand() int {
 
 	spanRemoteConnect.Finish()
 
-	vmmLogger.Info("Connected via SSH")
-
-	if !egressTestConfig.EgressNoWait {
-		spanEgressWait := tracer.StartSpan("rootfs-egress-wait", opentracing.ChildOf(spanRemoteConnect.Context()))
-		egressCtx, egressWaitCancelFunc := context.WithTimeout(vmmCtx, time.Second*time.Duration(egressTestConfig.EgressTestTimeoutSeconds))
-		defer egressWaitCancelFunc()
-
-		egressTarget := egressTestConfig.EgressTestTarget
-		if egressTarget == "" && gateway != "" {
-			egressTarget = gateway
-		}
-
-		if egressTarget == "" {
-			err := fmt.Errorf("egress test not possible without egress target: no gateway nor explicit target")
-			startedMachine.Stop(vmmCtx, remoteClient)
-			vmmLogger.Error(err.Error())
-			spanEgressWait.SetBaggageItem("error", err.Error())
-			spanEgressWait.Finish()
-			return 1
-		}
-
-		if err := remoteClient.WaitForEgress(egressCtx, egressTarget); err != nil {
-			startedMachine.Stop(vmmCtx, remoteClient)
-			vmmLogger.Error("did not get egress connectivity within a timeout", "reason", err)
-			spanEgressWait.SetBaggageItem("error", err.Error())
-			spanEgressWait.Finish()
-			return 1
-		}
-		spanEgressWait.Finish()
-	} else {
-		vmmLogger.Debug("Egress test explicitly skipped")
-	}
-
 	postBuildCommands := []commands.Run{}
 	for _, cmd := range commandConfig.PostBuildCommands {
 		postBuildCommands = append(postBuildCommands, commands.RunWithDefaults(cmd))
@@ -501,18 +464,20 @@ func processCommand() int {
 
 	spanBuildExec := tracer.StartSpan("rootfs-build-exec", opentracing.ChildOf(spanRemoteConnect.Context()))
 
-	if buildErr := buildContext.
+	executionCtx, buildErr := contextBuilder.
 		WithLogger(vmmLogger.Named("builder")).
 		WithPostBuildCommands(postBuildCommands...).
 		WithPreBuildCommands(preBuildCommands...).
-		WithDependencyResources(dependencyResources).
-		Build(remoteClient); err != nil {
+		CreateContext(dependencyResources)
+	if buildErr != nil {
 		startedMachine.Stop(vmmCtx, remoteClient)
 		vmmLogger.Error("Failed boostrapping remote via SSH", "reason", buildErr)
 		spanBuildExec.SetBaggageItem("error", buildErr.Error())
 		spanBuildExec.Finish()
 		return 1
 	}
+
+	rootLogger.Error(" =======================> ", executionCtx)
 
 	spanBuildExec.Finish()
 
@@ -534,7 +499,7 @@ func processCommand() int {
 		return 1
 	}
 
-	buildEntrypointInfo := buildContext.EntrypointInfo()
+	buildEntrypointInfo := contextBuilder.EntrypointInfo()
 
 	fsFileName := filepath.Base(machineConfig.RootfsOverride())
 	createdRootfsFile := filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root", fsFileName)
@@ -561,12 +526,12 @@ func processCommand() int {
 				Image:   name,
 				Version: version,
 			},
-			Labels:  buildContext.Metadata(),
+			Labels:  contextBuilder.Metadata(),
 			Parent:  resolvedRootfs.Metadata(),
-			Ports:   buildContext.ExposedPorts(),
+			Ports:   contextBuilder.ExposedPorts(),
 			Tag:     commandConfig.Tag,
 			Type:    metadata.MetadataTypeRootfs,
-			Volumes: buildContext.Volumes(),
+			Volumes: contextBuilder.Volumes(),
 		},
 		Org:     org,
 		Image:   name,

@@ -11,13 +11,13 @@ type DockerfileSerializable interface {
 
 // Add represents the ADD instruction.
 type Add struct {
-	OriginalCommand    string
-	OriginalSource     string
-	Source             string
-	Target             string
-	Workdir            Workdir
-	User               User
-	UserFromLocalChown *User
+	OriginalCommand    string  `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	OriginalSource     string  `json:"OriginalSource" mapstructure:"OriginalSource"`
+	Source             string  `json:"Source" mapstructure:"Source"`
+	Target             string  `json:"Target" mapstructure:"Target"`
+	Workdir            Workdir `json:"Workdir" mapstructure:"Workdir"`
+	User               User    `json:"User" mapstructure:"User"`
+	UserFromLocalChown *User   `json:"UserFromLocalChown" mapstructure:"UserFromLocalChown"`
 }
 
 func (cmd Add) GetOriginal() string {
@@ -26,7 +26,7 @@ func (cmd Add) GetOriginal() string {
 
 // Arg represents the ARG instruction.
 type Arg struct {
-	OriginalCommand string
+	OriginalCommand string `json:"OriginalCommand" mapstructure:"OriginalCommand"`
 	k, v            string
 	hadv            bool
 }
@@ -66,7 +66,7 @@ func (cmd Arg) Value() (string, bool) {
 
 // Cmd represents the CMD instruction.
 type Cmd struct {
-	OriginalCommand string   `json:"-" mapstructure:"-"`
+	OriginalCommand string   `json:"OriginalCommand" mapstructure:"OriginalCommand"`
 	Values          []string `json:"values" mapstructure:"values"`
 }
 
@@ -76,14 +76,14 @@ func (cmd Cmd) GetOriginal() string {
 
 // Copy represents the COPY instruction.
 type Copy struct {
-	OriginalCommand    string
-	OriginalSource     string
-	Source             string
-	Stage              string
-	Target             string
-	Workdir            Workdir
-	User               User
-	UserFromLocalChown *User
+	OriginalCommand    string  `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	OriginalSource     string  `json:"OriginalSource" mapstructure:"OriginalSource"`
+	Source             string  `json:"Source" mapstructure:"Source"`
+	Stage              string  `json:"Stage" mapstructure:"Stage"`
+	Target             string  `json:"Target" mapstructure:"Target"`
+	Workdir            Workdir `json:"Workdir" mapstructure:"Workdir"`
+	User               User    `json:"User" mapstructure:"User"`
+	UserFromLocalChown *User   `json:"UserFromLocalChown" mapstructure:"UserFromLocalChown"`
 }
 
 func (cmd Copy) GetOriginal() string {
@@ -92,12 +92,12 @@ func (cmd Copy) GetOriginal() string {
 
 // Entrypoint represents the ENTRYPOINT instruction.
 type Entrypoint struct {
-	OriginalCommand string            `json:"-" mapstructure:"-"`
-	Values          []string          `json:"values" mapstructure:"values"`
-	Env             map[string]string `json:"env" mapstructure:"env"`
-	Shell           Shell             `json:"shell" mapstructure:"shell"`
-	Workdir         Workdir           `json:"workdir" mapstructure:"workdir"`
-	User            User              `json:"user" mapstructure:"user"`
+	OriginalCommand string            `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	Values          []string          `json:"Values" mapstructure:"Values"`
+	Env             map[string]string `json:"Env" mapstructure:"Env"`
+	Shell           Shell             `json:"Shell" mapstructure:"Shell"`
+	Workdir         Workdir           `json:"Workdir" mapstructure:"Workdir"`
+	User            User              `json:"User" mapstructure:"User"`
 }
 
 func (cmd Entrypoint) GetOriginal() string {
@@ -106,9 +106,9 @@ func (cmd Entrypoint) GetOriginal() string {
 
 // Env represents the ENV instruction.
 type Env struct {
-	OriginalCommand string
-	Name            string
-	Value           string
+	OriginalCommand string `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	Name            string `json:"Name" mapstructure:"Name"`
+	Value           string `json:"Value" mapstructure:"Value"`
 }
 
 func (cmd Env) GetOriginal() string {
@@ -117,8 +117,8 @@ func (cmd Env) GetOriginal() string {
 
 // Expose represents the EXPOSE instruction.
 type Expose struct {
-	OriginalCommand string
-	RawValue        string
+	OriginalCommand string `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	RawValue        string `json:"RawValue" mapstructure:"RawValue"`
 }
 
 func (cmd Expose) GetOriginal() string {
@@ -149,9 +149,9 @@ func (sf *StructuredFrom) Version() string {
 
 // From represents the FROM instruction.
 type From struct {
-	OriginalCommand string
-	BaseImage       string
-	StageName       string
+	OriginalCommand string `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	BaseImage       string `json:"BaseImage" mapstructure:"BaseImage"`
+	StageName       string `json:"StageName" mapstructure:"StageName"`
 }
 
 func (cmd From) GetOriginal() string {
@@ -174,9 +174,9 @@ func (cmd From) ToStructuredFrom() *StructuredFrom {
 
 // Label represents the LABEL instruction.
 type Label struct {
-	OriginalCommand string
-	Key             string
-	Value           string
+	OriginalCommand string `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	Key             string `json:"Key" mapstructure:"Key"`
+	Value           string `json:"Value" mapstructure:"Value"`
 }
 
 func (cmd Label) GetOriginal() string {
@@ -185,13 +185,13 @@ func (cmd Label) GetOriginal() string {
 
 // Run represents the RUN instruction.
 type Run struct {
-	OriginalCommand string
-	Args            map[string]string
-	Command         string
-	Env             map[string]string
-	Shell           Shell
-	Workdir         Workdir
-	User            User
+	OriginalCommand string            `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	Args            map[string]string `json:"Args" mapstructure:"Args"`
+	Command         string            `json:"Command" mapstructure:"Command"`
+	Env             map[string]string `json:"Env" mapstructure:"Env"`
+	Shell           Shell             `json:"Shell" mapstructure:"Shell"`
+	Workdir         Workdir           `json:"Workdir" mapstructure:"Workdir"`
+	User            User              `json:"User" mapstructure:"User"`
 }
 
 func (cmd Run) GetOriginal() string {
@@ -200,8 +200,8 @@ func (cmd Run) GetOriginal() string {
 
 // Shell represents the SHELL instruction.
 type Shell struct {
-	OriginalCommand string   `json:"-" mapstructure:"-"`
-	Commands        []string `json:"commands" mapstructure:"commands"`
+	OriginalCommand string   `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	Commands        []string `json:"Commands" mapstructure:"Commands"`
 }
 
 func (cmd Shell) GetOriginal() string {
@@ -210,8 +210,8 @@ func (cmd Shell) GetOriginal() string {
 
 // User represents the USER instruction.
 type User struct {
-	OriginalCommand string `json:"-" mapstructure:"-"`
-	Value           string `json:"value" mapstructure:"value"`
+	OriginalCommand string `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	Value           string `json:"Value" mapstructure:"Value"`
 }
 
 func (cmd User) GetOriginal() string {
@@ -220,16 +220,16 @@ func (cmd User) GetOriginal() string {
 
 // Volume represents the VOLUME instruction.
 type Volume struct {
-	OriginalCommand string
-	Workdir         Workdir
-	User            User
-	Values          []string
+	OriginalCommand string   `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	Workdir         Workdir  `json:"Workdir" mapstructure:"Workdir"`
+	User            User     `json:"User" mapstructure:"User"`
+	Values          []string `json:"Values" mapstructure:"Values"`
 }
 
 // Workdir represents the WORKDIR instruction.
 type Workdir struct {
-	OriginalCommand string `json:"-" mapstructure:"-"`
-	Value           string `json:"value" mapstructure:"value"`
+	OriginalCommand string `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	Value           string `json:"Value" mapstructure:"Value"`
 }
 
 func (cmd Workdir) GetOriginal() string {
