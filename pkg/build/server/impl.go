@@ -8,7 +8,11 @@ import (
 	"github.com/combust-labs/firebuild/grpc/proto"
 )
 
-type ServerEventProvider interface {
+// TODO: handle closing of channels when the owning server is closed.
+
+// EventProvider provides the event subsriptions to the server executor.
+// When client event occurs, a corresponding event will be sent via one of the channels.
+type EventProvider interface {
 	OnAbort() <-chan error
 	OnStderr() <-chan string
 	OnStdout() <-chan string
@@ -17,11 +21,11 @@ type ServerEventProvider interface {
 
 type serverImplInterface interface {
 	proto.RootfsServerServer
-	ServerEventProvider
+	EventProvider
 }
 
 type serverImpl struct {
-	serverCtx *Context
+	serverCtx *WorkContext
 
 	chanAbort   chan error
 	chanStderr  chan string
@@ -29,7 +33,7 @@ type serverImpl struct {
 	chanSuccess chan struct{}
 }
 
-func newServerImpl(serverCtx *Context) serverImplInterface {
+func newServerImpl(serverCtx *WorkContext) serverImplInterface {
 	return &serverImpl{
 		serverCtx:   serverCtx,
 		chanAbort:   make(chan error, 1),

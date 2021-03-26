@@ -129,6 +129,7 @@ type MDRun struct {
 	Type              Type                 `json:"type" mapstructure:"type"`
 }
 
+// AsMMDS converts the run metadata to MMDS metadata.
 func (r *MDRun) AsMMDS() (interface{}, error) {
 
 	env, err := r.Configs.RunConfig.MergedEnvironment()
@@ -140,7 +141,7 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 		return nil, errors.Wrap(err, "failed fetching public keys")
 	}
 
-	entrypointJson, err := r.Rootfs.EntrypointInfo.ToJsonString()
+	entrypointJSON, err := r.Rootfs.EntrypointInfo.ToJsonString()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed fetching public keys")
 	}
@@ -162,7 +163,7 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 					}
 					return result
 				}(),
-				EntrypointJSON: entrypointJson,
+				EntrypointJSON: entrypointJSON,
 				Env:            env,
 				LocalHostname:  r.Configs.RunConfig.Hostname,
 				Machine: &mmds.MMDSMachine{

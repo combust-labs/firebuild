@@ -4,7 +4,7 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// MachineConfig provides options for the machine agress test.
+// MachineConfig provides machine configuration options.
 type MachineConfig struct {
 	flagBase
 

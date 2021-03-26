@@ -30,6 +30,9 @@ func mustNewArg(t *testing.T, rawValue string) commands.Arg {
 
 func TestContextBuilderSingleStageWithResources(t *testing.T) {
 
+	logger := hclog.Default()
+	logger.SetLevel(hclog.Debug)
+
 	tempDir, err := ioutil.TempDir("", "")
 	if err != nil {
 		t.Fatal("expected temp dir, got error", err)
@@ -64,7 +67,7 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 		GracefulStopTimeoutMillis: 1000,
 	}
 
-	server := server.New(grpcConfig, hclog.Default().Named("grpc-server"))
+	server := server.New(grpcConfig, logger.Named("grpc-server"))
 	server.Start(buildCtx)
 
 	select {

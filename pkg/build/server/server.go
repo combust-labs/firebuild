@@ -2,8 +2,6 @@ package server
 
 import (
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
 	"net"
 	"sync"
 	"time"
@@ -16,11 +14,18 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+// GRPCServiceConfig contains the configuration for the GRPC server.
 type GRPCServiceConfig struct {
-	BindHostPort              string
+	// Host and port to bind on
+	BindHostPort string
+	// How long to wait for the GRPC server to shutdown
+	// before stopping forcefully.
 	GracefulStopTimeoutMillis int
-	ServerName                string
-	TLSConfigServer           *tls.Config
+	// Identifies the GRPC server. This setting is required when doing mTLS.
+	ServerName string
+	// Contains the GRPC server configuration.
+	// If not provided, a runtime, build only CA and TLS context will be created.
+	TLSConfigServer *tls.Config
 	// TLSConfigClient contains a tls.Config to use with the client
 	// but only when TLSConfigServer was not given.
 	// The client config is obtained from auto-generated CA.
@@ -28,17 +33,26 @@ type GRPCServiceConfig struct {
 	TLSConfigClient *tls.Config
 }
 
-type ServerProvider interface {
-	ServerEventProvider
-	Start(serverCtx *Context)
+// Provider defines a GRPC server behaviour.
+type Provider interface {
+	EventProvider
+	// Starts the server with a given work context.
+	Start(serverCtx *WorkContext)
+	// Stops the server, if the server is started.
 	Stop()
+	// ReadyNotify returns a channel that will be closed when the server is ready to serve client requests.
 	ReadyNotify() <-chan struct{}
+	// FailedNotify returns a channel that will be contain the error if the server has failed to start.
 	FailedNotify() <-chan error
+	// StoppedNotify returns a channel that will be closed when the server has stopped.
 	StoppedNotify() <-chan struct{}
 }
 
+// Resources is a map of resolved resources the server handles for the client.
 type Resources = map[string][]resources.ResolvedResource
-type Context struct {
+
+// WorkContext contains the information for the bootstrap work to execute.
+type WorkContext struct {
 	ExecutableCommands []interface{}
 	ResourcesResolved  Resources
 }
@@ -61,7 +75,7 @@ type grpcSvc struct {
 }
 
 // New returns a new instance of the server.
-func New(cfg *GRPCServiceConfig, logger hclog.Logger) ServerProvider {
+func New(cfg *GRPCServiceConfig, logger hclog.Logger) Provider {
 	return &grpcSvc{
 		config:      cfg,
 		logger:      logger,
@@ -71,17 +85,15 @@ func New(cfg *GRPCServiceConfig, logger hclog.Logger) ServerProvider {
 	}
 }
 
-func (s *grpcSvc) Start(serverCtx *Context) {
+// Start starts the server with a given work context.
+func (s *grpcSvc) Start(serverCtx *WorkContext) {
 	s.Lock()
 	defer s.Unlock()
 
 	if !s.wasStarted {
-
 		s.wasStarted = true
-
 		listener, err := net.Listen("tcp", s.config.BindHostPort)
 		if err != nil {
-			//s.logger.Error("Failed to create TCP listener", "hostport", s.config.BindHostPort, "reason", err)
 			s.chanFailed <- err
 			return
 		}
@@ -90,74 +102,30 @@ func (s *grpcSvc) Start(serverCtx *Context) {
 
 		if s.config.TLSConfigServer == nil {
 
-			//
-			// auto-generate a bootstrap only root CA
-			// with a server and client cert
-			//
+			// if there is no server TLS config, generate a new runtime CA
+			// and create a new server and client TLS config
 
-			rootCert, rootPem, rootKey, rootCaCertErr := ca.GenCARoot()
-			if rootCaCertErr != nil {
-				s.chanFailed <- rootCaCertErr
+			embeddedCA, embeddedCAErr := ca.NewDefaultEmbeddedCAWithLogger(&ca.EmbeddedCAConfig{}, s.logger.Named("embdedded-ca"))
+			if embeddedCAErr != nil {
+				s.chanFailed <- embeddedCAErr
 				return
 			}
 
-			s.logger.Info("root CA cert generated")
-
-			//intermediateCaCert, _ /* intermediateCaPem */, intermediateCaKey, intermediateCaCertErr := ca.GenRootIntermediate(rootCert, rootKey)
-			//if intermediateCaCertErr != nil {
-			//	s.chanFailed <- intermediateCaCertErr
-			//	return
-			//}
-
-			//s.logger.Info("root CA intermediate cert generated")
-
-			_, serverPem, serverKey, serverCertErr := ca.GenServerCert(rootCert, rootKey)
-			if serverCertErr != nil {
-				s.chanFailed <- serverCertErr
-				return
-			}
-
-			s.logger.Info("server cert generated")
-
-			_, clientPem, clientKey, clientCertErr := ca.GenClientCert(rootCert, rootKey)
-			if clientCertErr != nil {
-				s.chanFailed <- clientCertErr
-				return
-			}
-
-			rootCAs := x509.NewCertPool()
-			rootCAs.AppendCertsFromPEM(rootPem)
-
-			serverKeyBytes := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(serverKey)})
-			serverTlsCertificate, err := tls.X509KeyPair(serverPem, serverKeyBytes)
+			serverTLSConfig, err := embeddedCA.NewServerCertTLSConfig()
 			if err != nil {
-				s.chanFailed <- clientCertErr
+				s.chanFailed <- embeddedCAErr
 				return
 			}
 
-			clientKeyBytes := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(clientKey)})
-			clientTlsCertificate, err := tls.X509KeyPair(clientPem, clientKeyBytes)
+			clientTLSConfig, err := embeddedCA.NewClientCertTLSConfig(s.config.ServerName)
 			if err != nil {
-				s.chanFailed <- clientCertErr
+				s.chanFailed <- embeddedCAErr
 				return
 			}
 
-			grpcServerOptions = append(grpcServerOptions, grpc.Creds(credentials.NewTLS(&tls.Config{
-				ClientAuth:   tls.RequireAndVerifyClientCert,
-				ClientCAs:    rootCAs,
-				Certificates: []tls.Certificate{serverTlsCertificate},
-				//InsecureSkipVerify: true,
-			})))
+			grpcServerOptions = append(grpcServerOptions, grpc.Creds(credentials.NewTLS(serverTLSConfig)))
 
-			clientRootCAs := x509.NewCertPool()
-			clientRootCAs.AppendCertsFromPEM(rootPem)
-
-			s.config.TLSConfigClient = &tls.Config{
-				ServerName:   s.config.ServerName,
-				RootCAs:      clientRootCAs,
-				Certificates: []tls.Certificate{clientTlsCertificate},
-				//InsecureSkipVerify: true,
-			}
+			s.config.TLSConfigClient = clientTLSConfig
 
 		} else {
 			grpcServerOptions = append(grpcServerOptions, grpc.Creds(credentials.NewTLS(s.config.TLSConfigServer)))
@@ -214,7 +182,7 @@ func (s *grpcSvc) Start(serverCtx *Context) {
 
 		*/
 
-		s.logger.Info("Registering seervice with the GRPC server")
+		s.logger.Info("Registering service with the GRPC server")
 
 		s.svc = newServerImpl(serverCtx)
 
@@ -278,17 +246,17 @@ func (s *grpcSvc) Stop() {
 
 }
 
-func (impl *grpcSvc) OnAbort() <-chan error {
-	return impl.svc.OnAbort()
+func (s *grpcSvc) OnAbort() <-chan error {
+	return s.svc.OnAbort()
 }
-func (impl *grpcSvc) OnStderr() <-chan string {
-	return impl.svc.OnStderr()
+func (s *grpcSvc) OnStderr() <-chan string {
+	return s.svc.OnStderr()
 }
-func (impl *grpcSvc) OnStdout() <-chan string {
-	return impl.svc.OnStdout()
+func (s *grpcSvc) OnStdout() <-chan string {
+	return s.svc.OnStdout()
 }
-func (impl *grpcSvc) OnSuccess() <-chan struct{} {
-	return impl.svc.OnSuccess()
+func (s *grpcSvc) OnSuccess() <-chan struct{} {
+	return s.svc.OnSuccess()
 }
 
 // ReadyNotify returns a channel that will be closed when the server is ready to serve client requests.

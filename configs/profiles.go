@@ -13,6 +13,7 @@ import (
 
 const defaultProfileConfDir = "/etc/firebuild/profiles"
 
+// ProfileCommandConfig provides the command profile selection configuration options.
 type ProfileCommandConfig struct {
 	flagBase
 	ValidatingConfig `json:"-"`
@@ -21,10 +22,12 @@ type ProfileCommandConfig struct {
 	ProfileConfDir string
 }
 
+// NewProfileCommandConfig returns an initialized configuration instance.
 func NewProfileCommandConfig() *ProfileCommandConfig {
 	return &ProfileCommandConfig{}
 }
 
+// FlagSet returns an instance of the flag set for the configuration.
 func (c *ProfileCommandConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.StringVar(&c.Profile, "profile", "", "Configuration profile to apply")
@@ -33,6 +36,7 @@ func (c *ProfileCommandConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
+// Validate validates the correctness of the configuration.
 func (c *ProfileCommandConfig) Validate() error {
 	if c.Profile == "" {
 		return fmt.Errorf("--profile is empty")
@@ -40,6 +44,7 @@ func (c *ProfileCommandConfig) Validate() error {
 	return nil
 }
 
+// ProfileCreateConfig represents the profile create command configuration.
 type ProfileCreateConfig struct {
 	flagBase
 	ValidatingConfig `json:"-"`
@@ -48,10 +53,12 @@ type ProfileCreateConfig struct {
 	Overwrite bool `json:"-"`
 }
 
+// NewProfileCreateConfig returns an initialized configuration instance.
 func NewProfileCreateConfig() *ProfileCreateConfig {
 	return &ProfileCreateConfig{}
 }
 
+// FlagSet returns an instance of the flag set for the configuration.
 func (c *ProfileCreateConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.StringVar(&c.BinaryFirecracker, "binary-firecracker", "", "Path to the Firecracker binary to use")
@@ -69,6 +76,7 @@ func (c *ProfileCreateConfig) FlagSet() *pflag.FlagSet {
 	return c.flagSet
 }
 
+// Validate validates the correctness of the configuration.
 func (c *ProfileCreateConfig) Validate() error {
 
 	// these must point to an existing location:

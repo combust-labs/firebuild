@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 )
 
+// ListProfiles list available profiles. Retuns a sorted list of profile names.
 func ListProfiles(location string) ([]string, error) {
 	result := []string{}
 	files, err := os.ReadDir(location)
@@ -31,6 +32,8 @@ func ListProfiles(location string) ([]string, error) {
 	return result, nil
 }
 
+// ReadProfile reads the profile information for a profile name and profile directory.
+// Name is always lowercase.
 func ReadProfile(name, location string) (ResolvedProfile, error) {
 	profilePath := filepath.Join(location, strings.ToLower(name))
 	if _, fileErr := utils.CheckIfExistsAndIsRegular(profilePath); fileErr != nil {
@@ -50,6 +53,8 @@ func ReadProfile(name, location string) (ResolvedProfile, error) {
 	return &defaultResolvedProfile{underlying: profile}, nil
 }
 
+// WriteProfileFile writes the profile to a file named wuth `name` in the `location` directory.
+// Name is always lowercase.
 func WriteProfileFile(name, location string, config *configs.ProfileCreateConfig) error {
 	profilePath := filepath.Join(location, strings.ToLower(name))
 	dirStat, dirErr := utils.CheckIfExistsAndIsDirectory(profilePath)
@@ -81,9 +86,14 @@ func WriteProfileFile(name, location string, config *configs.ProfileCreateConfig
 	return nil
 }
 
+// ResolvedProfile provides additional functionality to a profile loaded from disk.
 type ResolvedProfile interface {
-	Profile() *model.Profile
+	// Returns a merged storage configuration.
 	GetMergedStorageConfig() map[string]interface{}
+	// Returns an underlying profile.
+	Profile() *model.Profile
+	// Updates the config of the underlying profile.
+	// Changes anre not automatically persisted.
 	UpdateConfigs(...configs.ProfileInheriting) error
 }
 
@@ -91,10 +101,7 @@ type defaultResolvedProfile struct {
 	underlying *model.Profile
 }
 
-func (c *defaultResolvedProfile) Profile() *model.Profile {
-	return c.underlying
-}
-
+// GetMergedStorageConfig returns a merged storage configuration.
 func (c *defaultResolvedProfile) GetMergedStorageConfig() map[string]interface{} {
 	result := map[string]interface{}{}
 	for k, v := range c.underlying.StorageProviderConfigStrings {
@@ -106,6 +113,13 @@ func (c *defaultResolvedProfile) GetMergedStorageConfig() map[string]interface{}
 	return result
 }
 
+// Profile returns an underlying profile.
+func (c *defaultResolvedProfile) Profile() *model.Profile {
+	return c.underlying
+}
+
+// UpdateConfigs updates the config of the underlying profile.
+// Changes anre not automatically persisted.
 func (c *defaultResolvedProfile) UpdateConfigs(config ...configs.ProfileInheriting) error {
 	for _, cfg := range config {
 		if err := cfg.UpdateFromProfile(c.underlying); err != nil {

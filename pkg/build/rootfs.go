@@ -16,7 +16,7 @@ import (
 // Build represents the build operation.
 type Build interface {
 	AddInstructions(...interface{}) error
-	CreateContext(server.Resources) (*server.Context, error)
+	CreateContext(server.Resources) (*server.WorkContext, error)
 	EntrypointInfo() *EntrypointInfo
 	ExposedPorts() []string
 	From() commands.From
@@ -56,9 +56,9 @@ type defaultBuild struct {
 	volumes []string
 }
 
-func (b *defaultBuild) CreateContext(dependencies server.Resources) (*server.Context, error) {
+func (b *defaultBuild) CreateContext(dependencies server.Resources) (*server.WorkContext, error) {
 
-	ctx := &server.Context{
+	ctx := &server.WorkContext{
 		ExecutableCommands: []interface{}{},
 		ResourcesResolved:  make(server.Resources),
 	}

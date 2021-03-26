@@ -1,5 +1,9 @@
 PHONY: test-dependency-build
 
+.PHONY: lint
+lint:
+	golint ./...
+
 .PHONY: genproto
 genproto:
 	protoc -I=./grpc/proto \
