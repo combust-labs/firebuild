@@ -17,6 +17,8 @@ import (
 	"github.com/combust-labs/firebuild/cmd/rootfs"
 	"github.com/combust-labs/firebuild/cmd/run"
 	"github.com/spf13/cobra"
+
+	_ "github.com/combust-labs/firebuild/pkg/utils/randinit"
 )
 
 var rootCmd = &cobra.Command{
