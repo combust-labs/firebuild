@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 
 	"github.com/combust-labs/firebuild/grpc/proto"
+	"github.com/gofrs/uuid"
 )
 
 // TODO: handle closing of channels when the owning server is closed.
@@ -62,7 +66,60 @@ func (impl *serverImpl) Commands(ctx context.Context, _ *proto.Empty) (*proto.Co
 }
 
 func (impl *serverImpl) Resource(req *proto.ResourceRequest, stream proto.RootfsServer_ResourceServer) error {
-	return errors.New("not implemented")
+	if resources, ok := impl.serverCtx.ResourcesResolved[req.Path]; ok {
+		// TODO: can this be parallel?
+		for _, resource := range resources {
+
+			resourceUUID := uuid.Must(uuid.NewV4()).String()
+			stream.Send(&proto.ResourceChunk{
+				Payload: &proto.ResourceChunk_Header{
+					Header: &proto.ResourceChunk_ResourceHeader{
+						SourcePath:    resource.SourcePath(),
+						TargetPath:    resource.TargetPath(),
+						FileMode:      int64(resource.TargetMode()),
+						IsDir:         resource.IsDir(),
+						TargetUser:    resource.TargetUser().Value,
+						TargetWorkdir: resource.TargetWorkdir().Value,
+						Id:            resourceUUID,
+					},
+				},
+			})
+
+			reader, err := resource.Contents()
+			if err != nil {
+				return err
+			}
+			buffer := make([]byte, 512*1024) // 512KB
+			for {
+				readBytes, err := reader.Read(buffer)
+				if readBytes == 0 && err == io.EOF {
+					stream.Send(&proto.ResourceChunk{
+						Payload: &proto.ResourceChunk_Eof{
+							Eof: &proto.ResourceChunk_ResourceEof{
+								Id: resourceUUID,
+							},
+						},
+					})
+					break
+				} else {
+					payload := buffer[0:readBytes]
+					hash := sha256.Sum256(payload)
+					stream.Send(&proto.ResourceChunk{
+						Payload: &proto.ResourceChunk_Chunk{
+							Chunk: &proto.ResourceChunk_ResourceContents{
+								Chunk:    payload,
+								Checksum: hash[:],
+								Id:       resourceUUID,
+							},
+						},
+					})
+				}
+			}
+		}
+	} else {
+		return fmt.Errorf("not found: '%s/%s'", req.Stage, req.Path)
+	}
+	return nil
 }
 
 func (impl *serverImpl) StdErr(ctx context.Context, req *proto.LogMessage) (*proto.Empty, error) {

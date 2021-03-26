@@ -22,9 +22,31 @@ message ResourceRequest {
     string stage = 2;
 }
 
+// A single resource path maps to one or multiple resources.
+// The targetPath indicates the actual file where the resource must be written to.
 message ResourceChunk {
-    bytes chunk = 1;
-    bytes checksum = 2;
+    message ResourceHeader {
+        string sourcePath = 1;
+        string targetPath = 2;
+        int64 fileMode = 3;
+        bool isDir = 4;
+        string targetUser = 5;
+        string targetWorkdir = 6;
+        string id = 7;
+    }
+    message ResourceContents {
+        bytes chunk = 1;
+        bytes checksum = 2;
+        string id = 3;
+    }
+    message ResourceEof {
+        string id = 1;
+    }
+    oneof payload {
+        ResourceHeader header = 1;
+        ResourceContents chunk = 2;
+        ResourceEof eof = 3;
+    }
 }
 
 

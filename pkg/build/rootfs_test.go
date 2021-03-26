@@ -85,9 +85,52 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 		t.Fatal("expected GRPC connection to dial, go error", err)
 	}
 	grpcClient := proto.NewRootfsServerClient(grpcConn)
+
 	response, err := grpcClient.Commands(context.Background(), &proto.Empty{})
 	if err != nil {
 		t.Fatal("expected GRPC client Commands() to return, go error", err)
+	}
+
+	for _, resourcePath := range []string{"resource1", "resource2"} {
+
+		resourceClient, err := grpcClient.Resource(context.Background(), &proto.ResourceRequest{
+			Path: resourcePath,
+		})
+
+		if err != nil {
+			t.Fatal("expected resource to be read from GRPC, got error", err)
+		}
+
+		for {
+			response, err := resourceClient.Recv()
+
+			if response == nil {
+				resourceClient.CloseSend()
+				break
+			}
+
+			// yes, err check after response check
+			if err != nil {
+				t.Fatal("failed reading chunk from server, got error", err)
+			}
+
+			switch tresponse := response.GetPayload().(type) {
+			case *proto.ResourceChunk_Eof:
+				t.Log(" ===============> finished file", tresponse.Eof.Id, "for", resourcePath)
+			case *proto.ResourceChunk_Chunk:
+				t.Log(" ===============> received chunk", tresponse.Chunk.Id,
+					"chunk", string(tresponse.Chunk.Chunk),
+					"checksum", string(tresponse.Chunk.Checksum))
+			case *proto.ResourceChunk_Header:
+				t.Log(" ===============> new file", tresponse.Header.SourcePath,
+					"target", tresponse.Header.TargetPath,
+					"mode", fs.FileMode(tresponse.Header.FileMode),
+					"isDir", tresponse.Header.IsDir,
+					"user", tresponse.Header.TargetUser,
+					"workdir", tresponse.Header.TargetWorkdir)
+			}
+		}
+
 	}
 
 	t.Log(response.Command)
