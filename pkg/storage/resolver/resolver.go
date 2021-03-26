@@ -25,6 +25,7 @@ func AddStorageFlags(set *pflag.FlagSet) {
 	set.AddFlagSet(StorageDirectoryFlags.GetFlags())
 }
 
+// Resolver resolves the storage resolver and configures the resolved provider.
 type Resolver interface {
 	GetStorageImpl(logger hclog.Logger) (storage.Provider, error)
 	GetStorageImplWithProvider(logger hclog.Logger, provider string) (storage.Provider, error)
@@ -38,6 +39,7 @@ type defaultResolver struct {
 	typeOverride string
 }
 
+// NewDefaultResolver returns an instance of the default resolver.
 func NewDefaultResolver() Resolver {
 	return &defaultResolver{
 		extraConfig: map[string]interface{}{},
@@ -94,6 +96,7 @@ func (r *defaultResolver) ResolveProvider(logger hclog.Logger, provider string, 
 	return impl, nil
 }
 
+// WithConfigurationOverride adds properties to the configuration.
 func (r *defaultResolver) WithConfigurationOverride(input map[string]interface{}) Resolver {
 	for k, v := range input {
 		r.extraConfig[k] = v
@@ -101,6 +104,7 @@ func (r *defaultResolver) WithConfigurationOverride(input map[string]interface{}
 	return r
 }
 
+// WithTypeOverride overrides the provider type to resolve.
 func (r *defaultResolver) WithTypeOverride(input string) Resolver {
 	r.typeOverride = input
 	return r

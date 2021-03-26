@@ -1,0 +1,42 @@
+syntax = "proto3";
+package proto;
+
+option go_package = "github.com/combust-labs/firebuild/grpc/proto";
+
+message AbortRequest {
+    string error = 1;
+}
+
+message CommandsResponse {
+    repeated string command = 1;
+}
+
+message Empty{}
+
+message LogMessage {
+    repeated string line = 1;
+}
+
+message ResourceRequest {
+    string path = 1;
+    string stage = 2;
+}
+
+message ResourceChunk {
+    bytes chunk = 1;
+    bytes checksum = 2;
+}
+
+
+service RootfsServer {
+
+    rpc Commands(Empty) returns (CommandsResponse);
+    rpc Resource(ResourceRequest) returns (stream ResourceChunk);
+
+    rpc StdErr(LogMessage) returns (Empty);
+    rpc StdOut(LogMessage) returns (Empty);
+
+    rpc Abort(AbortRequest) returns (Empty);
+    rpc Success(Empty) returns (Empty);
+
+}

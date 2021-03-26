@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"io/ioutil"
@@ -8,10 +9,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/combust-labs/firebuild/grpc/proto"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/reader"
 	"github.com/combust-labs/firebuild/pkg/build/resources"
+	"github.com/combust-labs/firebuild/pkg/build/server"
 	"github.com/docker/docker/pkg/fileutils"
+	"github.com/hashicorp/go-hclog"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 func mustNewArg(t *testing.T, rawValue string) commands.Arg {
@@ -23,6 +29,9 @@ func mustNewArg(t *testing.T, rawValue string) commands.Arg {
 }
 
 func TestContextBuilderSingleStageWithResources(t *testing.T) {
+
+	logger := hclog.Default()
+	logger.SetLevel(hclog.Debug)
 
 	tempDir, err := ioutil.TempDir("", "")
 	if err != nil {
@@ -47,12 +56,41 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 	if err := contextBuilder.AddInstructions(readResult.Commands()...); err != nil {
 		t.Fatal("expected commands to be added, got error", err)
 	}
-	buildCtx, err := contextBuilder.WithResolver(resources.NewDefaultResolver()).CreateContext(make(Resources))
+	buildCtx, err := contextBuilder.WithResolver(resources.NewDefaultResolver()).CreateContext(make(server.Resources))
 	if err != nil {
 		t.Fatal("expected build context to be created, got error", err)
 	}
 
-	t.Log(buildCtx)
+	grpcConfig := &server.GRPCServiceConfig{
+		ServerName:                "localhost",
+		BindHostPort:              "127.0.0.1:5000",
+		GracefulStopTimeoutMillis: 1000,
+	}
+
+	server := server.New(grpcConfig, logger.Named("grpc-server"))
+	server.Start(buildCtx)
+
+	select {
+	case startErr := <-server.FailedNotify():
+		t.Fatal("expected the GRPC server to start but it failed", startErr)
+	case <-server.ReadyNotify():
+		t.Log("GRPC server started and serving on", grpcConfig.BindHostPort)
+		defer server.Stop()
+	}
+
+	grpcConn, err := grpc.Dial(grpcConfig.BindHostPort,
+		grpc.WithTransportCredentials(credentials.NewTLS(grpcConfig.TLSConfigClient)))
+
+	if err != nil {
+		t.Fatal("expected GRPC connection to dial, go error", err)
+	}
+	grpcClient := proto.NewRootfsServerClient(grpcConn)
+	response, err := grpcClient.Commands(context.Background(), &proto.Empty{})
+	if err != nil {
+		t.Fatal("expected GRPC client Commands() to return, go error", err)
+	}
+
+	t.Log(response.Command)
 }
 
 func TestDockerignoreMatches(t *testing.T) {
@@ -91,7 +129,8 @@ func TestDockerignoreMatches(t *testing.T) {
 
 const testDockerfile1 = `FROM alpine:3.13
 ARG PARAM1=value
-ENV ENVPARAM1=ebvparam1
+ENV ENVPARAM1=envparam1
+RUN mkdir -p /dir
 ADD resource1 /target/resource1
 COPY resource2 /target/resource2
 RUN cp /dir/${ENVPARAM1} \

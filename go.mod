@@ -23,5 +23,8 @@ require (
 	github.com/subosito/gotenv v1.2.0
 	github.com/uber/jaeger-client-go v2.25.0+incompatible
 	golang.org/x/crypto v0.0.0-20201117144127-c1f2f97bffc9
-	golang.org/x/sys v0.0.0-20210227040730-b0d1d43c014d // indirect
+	golang.org/x/net v0.0.0-20210324205630-d1beb07c2056 // indirect
+	google.golang.org/genproto v0.0.0-20210325141258-5636347f2b14 // indirect
+	google.golang.org/grpc v1.36.0
+	google.golang.org/protobuf v1.26.0
 )

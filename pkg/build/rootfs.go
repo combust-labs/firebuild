@@ -8,21 +8,15 @@ import (
 	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/env"
 	"github.com/combust-labs/firebuild/pkg/build/resources"
+	"github.com/combust-labs/firebuild/pkg/build/server"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"
 )
 
-type Resources = map[string][]resources.ResolvedResource
-
-type Context struct {
-	ExecutableCommands []interface{}
-	ResourcesResolved  Resources
-}
-
 // Build represents the build operation.
 type Build interface {
 	AddInstructions(...interface{}) error
-	CreateContext(Resources) (*Context, error)
+	CreateContext(server.Resources) (*server.WorkContext, error)
 	EntrypointInfo() *EntrypointInfo
 	ExposedPorts() []string
 	From() commands.From
@@ -62,11 +56,11 @@ type defaultBuild struct {
 	volumes []string
 }
 
-func (b *defaultBuild) CreateContext(dependencies Resources) (*Context, error) {
+func (b *defaultBuild) CreateContext(dependencies server.Resources) (*server.WorkContext, error) {
 
-	ctx := &Context{
+	ctx := &server.WorkContext{
 		ExecutableCommands: []interface{}{},
-		ResourcesResolved:  make(Resources),
+		ResourcesResolved:  make(server.Resources),
 	}
 
 	patternMatcher, matcherCreateErr := fileutils.NewPatternMatcher(b.excludes)
@@ -119,7 +113,7 @@ func (b *defaultBuild) CreateContext(dependencies Resources) (*Context, error) {
 		switch tcommand := command.(type) {
 		case commands.Add:
 
-			if !patternMatcherFunc(tcommand.Source) {
+			if patternMatcherFunc(tcommand.Source) {
 				continue
 			}
 
@@ -142,7 +136,7 @@ func (b *defaultBuild) CreateContext(dependencies Resources) (*Context, error) {
 			}
 		case commands.Copy:
 
-			if !patternMatcherFunc(tcommand.Source) {
+			if patternMatcherFunc(tcommand.Source) {
 				continue
 			}
 

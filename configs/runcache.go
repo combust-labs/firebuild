@@ -46,10 +46,12 @@ func (c *RunCacheConfig) Validate() error {
 	return nil
 }
 
+// LocationBuilds returns a full path to the builds run cache.
 func (c *RunCacheConfig) LocationBuilds() string {
 	return filepath.Join(c.RunCache, "builds")
 }
 
+// LocationRuns returns a full path to the runs run cache.
 func (c *RunCacheConfig) LocationRuns() string {
 	return filepath.Join(c.RunCache, "runs")
 }

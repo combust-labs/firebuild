@@ -5,7 +5,10 @@ import (
 	"strings"
 )
 
+// DockerfileSerializable identifies a command originating from a Docker environment: file or image.
+// Identifies Docker commands.
 type DockerfileSerializable interface {
+	// Returns the original string command the command was parsed from.
 	GetOriginal() string
 }
 
@@ -20,6 +23,7 @@ type Add struct {
 	UserFromLocalChown *User   `json:"UserFromLocalChown" mapstructure:"UserFromLocalChown"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Add) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -31,6 +35,7 @@ type Arg struct {
 	hadv            bool
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Arg) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -70,6 +75,7 @@ type Cmd struct {
 	Values          []string `json:"values" mapstructure:"values"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Cmd) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -86,6 +92,7 @@ type Copy struct {
 	UserFromLocalChown *User   `json:"UserFromLocalChown" mapstructure:"UserFromLocalChown"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Copy) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -100,6 +107,7 @@ type Entrypoint struct {
 	User            User              `json:"User" mapstructure:"User"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Entrypoint) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -111,6 +119,7 @@ type Env struct {
 	Value           string `json:"Value" mapstructure:"Value"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Env) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -121,6 +130,7 @@ type Expose struct {
 	RawValue        string `json:"RawValue" mapstructure:"RawValue"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Expose) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -154,6 +164,7 @@ type From struct {
 	StageName       string `json:"StageName" mapstructure:"StageName"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd From) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -179,6 +190,7 @@ type Label struct {
 	Value           string `json:"Value" mapstructure:"Value"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Label) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -194,6 +206,7 @@ type Run struct {
 	User            User              `json:"User" mapstructure:"User"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Run) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -204,6 +217,7 @@ type Shell struct {
 	Commands        []string `json:"Commands" mapstructure:"Commands"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Shell) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -214,6 +228,7 @@ type User struct {
 	Value           string `json:"Value" mapstructure:"Value"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd User) GetOriginal() string {
 	return cmd.OriginalCommand
 }
@@ -232,6 +247,7 @@ type Workdir struct {
 	Value           string `json:"Value" mapstructure:"Value"`
 }
 
+// GetOriginal returns the original string command the command was parsed from.
 func (cmd Workdir) GetOriginal() string {
 	return cmd.OriginalCommand
 }

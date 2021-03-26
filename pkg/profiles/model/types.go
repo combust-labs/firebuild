@@ -1,5 +1,6 @@
 package model
 
+// Profile represents a serializable profile information.
 type Profile struct {
 	BinaryFirecracker string `json:"binary-firecracker,omitempty" mapstructure:"binary-firecracker"`
 	BinaryJailer      string `json:"binary-jailer,omitempty" mapstructure:"binary-jailer"`
