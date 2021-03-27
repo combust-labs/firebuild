@@ -62,23 +62,22 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 	}
 
 	grpcConfig := &server.GRPCServiceConfig{
-		ServerName:                "localhost",
-		BindHostPort:              "127.0.0.1:5000",
-		GracefulStopTimeoutMillis: 1000,
+		BindHostPort: "127.0.0.1:5000",
 	}
 
-	server := server.New(grpcConfig, logger.Named("grpc-server"))
-	server.Start(buildCtx)
+	srv := server.New(grpcConfig, logger.Named("grpc-server"))
+	srv.Start(buildCtx)
 
 	select {
-	case startErr := <-server.FailedNotify():
+	case startErr := <-srv.FailedNotify():
 		t.Fatal("expected the GRPC server to start but it failed", startErr)
-	case <-server.ReadyNotify():
+	case <-srv.ReadyNotify():
 		t.Log("GRPC server started and serving on", grpcConfig.BindHostPort)
-		defer server.Stop()
+		defer srv.Stop()
 	}
 
 	grpcConn, err := grpc.Dial(grpcConfig.BindHostPort,
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(grpcConfig.MaxRecvMsgSize)),
 		grpc.WithTransportCredentials(credentials.NewTLS(grpcConfig.TLSConfigClient)))
 
 	if err != nil {
@@ -89,6 +88,10 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 	response, err := grpcClient.Commands(context.Background(), &proto.Empty{})
 	if err != nil {
 		t.Fatal("expected GRPC client Commands() to return, go error", err)
+	}
+
+	for _, cmd := range response.Command {
+		t.Log("Command", cmd)
 	}
 
 	for _, resourcePath := range []string{"resource1", "resource2"} {
@@ -132,8 +135,6 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 		}
 
 	}
-
-	t.Log(response.Command)
 }
 
 func TestDockerignoreMatches(t *testing.T) {

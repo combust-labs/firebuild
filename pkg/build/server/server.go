@@ -14,6 +14,15 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+const (
+	// DefaultGracefulStopTimeoutMillis is the default graceful shutdown wait time.
+	DefaultGracefulStopTimeoutMillis = 10000
+	// DefaultMaxRecvMsgSize is the default max recv msg size for the GRPC server.
+	DefaultMaxRecvMsgSize = 4 * 1024 * 1024
+	// DefaultServerName is the default ServerName.
+	DefaultServerName = "localhost"
+)
+
 // GRPCServiceConfig contains the configuration for the GRPC server.
 type GRPCServiceConfig struct {
 	// Host and port to bind on
@@ -21,6 +30,9 @@ type GRPCServiceConfig struct {
 	// How long to wait for the GRPC server to shutdown
 	// before stopping forcefully.
 	GracefulStopTimeoutMillis int
+	// MaxRecvMsgSize returns a ServerOption to set the max message size in bytes the server can receive.
+	// If this is not set, gRPC uses the default 4MB.
+	MaxRecvMsgSize int
 	// Identifies the GRPC server. This setting is required when doing mTLS.
 	ServerName string
 	// Contains the GRPC server configuration.
@@ -31,6 +43,25 @@ type GRPCServiceConfig struct {
 	// The client config is obtained from auto-generated CA.
 	// If the TLSConfigServer was provided, the client config will be always nil.
 	TLSConfigClient *tls.Config
+}
+
+// SafeClientMaxRecvMsgSize returns the maximum safe payload size to send by the client.
+func (c *GRPCServiceConfig) SafeClientMaxRecvMsgSize() int {
+	return int(float32(c.MaxRecvMsgSize) * 0.9)
+}
+
+// WithDefaultsApplied applies default configuration values to unconfigured properties.
+func (c *GRPCServiceConfig) WithDefaultsApplied() *GRPCServiceConfig {
+	if c.MaxRecvMsgSize == 0 {
+		c.MaxRecvMsgSize = DefaultMaxRecvMsgSize
+	}
+	if c.GracefulStopTimeoutMillis == 0 {
+		c.GracefulStopTimeoutMillis = DefaultGracefulStopTimeoutMillis
+	}
+	if c.ServerName == "" {
+		c.ServerName = DefaultServerName
+	}
+	return c
 }
 
 // Provider defines a GRPC server behaviour.
@@ -77,7 +108,7 @@ type grpcSvc struct {
 // New returns a new instance of the server.
 func New(cfg *GRPCServiceConfig, logger hclog.Logger) Provider {
 	return &grpcSvc{
-		config:      cfg,
+		config:      cfg.WithDefaultsApplied(),
 		logger:      logger,
 		chanFailed:  make(chan error, 1),
 		chanReady:   make(chan struct{}),
@@ -98,7 +129,9 @@ func (s *grpcSvc) Start(serverCtx *WorkContext) {
 			return
 		}
 
-		grpcServerOptions := []grpc.ServerOption{}
+		grpcServerOptions := []grpc.ServerOption{
+			grpc.MaxRecvMsgSize(s.config.MaxRecvMsgSize),
+		}
 
 		if s.config.TLSConfigServer == nil {
 
@@ -184,7 +217,7 @@ func (s *grpcSvc) Start(serverCtx *WorkContext) {
 
 		s.logger.Info("Registering service with the GRPC server")
 
-		s.svc = newServerImpl(serverCtx)
+		s.svc = newServerImpl(s.logger.Named("grpc-impl"), serverCtx, s.config)
 
 		proto.RegisterRootfsServerServer(s.srv, s.svc)
 

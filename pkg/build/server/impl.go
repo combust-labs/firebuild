@@ -10,6 +10,7 @@ import (
 
 	"github.com/combust-labs/firebuild/grpc/proto"
 	"github.com/gofrs/uuid"
+	"github.com/hashicorp/go-hclog"
 )
 
 // TODO: handle closing of channels when the owning server is closed.
@@ -29,7 +30,9 @@ type serverImplInterface interface {
 }
 
 type serverImpl struct {
-	serverCtx *WorkContext
+	logger        hclog.Logger
+	serviceConfig *GRPCServiceConfig
+	serverCtx     *WorkContext
 
 	chanAbort   chan error
 	chanStderr  chan string
@@ -37,13 +40,15 @@ type serverImpl struct {
 	chanSuccess chan struct{}
 }
 
-func newServerImpl(serverCtx *WorkContext) serverImplInterface {
+func newServerImpl(logger hclog.Logger, serverCtx *WorkContext, serviceConfig *GRPCServiceConfig) serverImplInterface {
 	return &serverImpl{
-		serverCtx:   serverCtx,
-		chanAbort:   make(chan error, 1),
-		chanStderr:  make(chan string),
-		chanStdout:  make(chan string),
-		chanSuccess: make(chan struct{}),
+		logger:        logger,
+		serviceConfig: serviceConfig,
+		serverCtx:     serverCtx,
+		chanAbort:     make(chan error, 1),
+		chanStderr:    make(chan string),
+		chanStdout:    make(chan string),
+		chanSuccess:   make(chan struct{}),
 	}
 }
 
@@ -89,7 +94,14 @@ func (impl *serverImpl) Resource(req *proto.ResourceRequest, stream proto.Rootfs
 			if err != nil {
 				return err
 			}
-			buffer := make([]byte, 512*1024) // 512KB
+
+			// make it a little bit smaller than the actual max size
+			safeBufSize := impl.serviceConfig.SafeClientMaxRecvMsgSize()
+
+			impl.logger.Debug("sending data with safe buffer size", "resource", resource.TargetPath(), "safe-buffer-size", safeBufSize)
+
+			buffer := make([]byte, safeBufSize)
+
 			for {
 				readBytes, err := reader.Read(buffer)
 				if readBytes == 0 && err == io.EOF {
