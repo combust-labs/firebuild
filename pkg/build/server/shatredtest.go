@@ -1,14 +1,18 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"strings"
 	"testing"
 
 	"github.com/combust-labs/firebuild/grpc/proto"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
+	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/hashicorp/go-hclog"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
@@ -158,7 +162,7 @@ type TestClient interface {
 	Abort(error) error
 	Commands(*testing.T) error
 	NextCommand() commands.VMInitSerializableCommand
-	Resource(string) (proto.RootfsServer_ResourceClient, error)
+	Resource(string) (<-chan resources.ResolvedResource, error)
 	StdErr([]string) error
 	StdOut([]string) error
 	Success() error
@@ -233,9 +237,59 @@ func (c *testClient) NextCommand() commands.VMInitSerializableCommand {
 	return result
 }
 
-func (c *testClient) Resource(input string) (proto.RootfsServer_ResourceClient, error) {
-	return c.underlying.Resource(context.Background(), &proto.ResourceRequest{Path: input})
+func (c *testClient) Resource(input string) (<-chan resources.ResolvedResource, error) {
+
+	chanResources := make(chan resources.ResolvedResource)
+
+	resourceClient, err := c.underlying.Resource(context.Background(), &proto.ResourceRequest{Path: input})
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+
+		var currentResource *testResolvedResource
+
+		for {
+			response, err := resourceClient.Recv()
+
+			if response == nil {
+				resourceClient.CloseSend()
+				break
+			}
+
+			// yes, err check after response check
+			if err != nil {
+				//t.Fatal("failed reading chunk from server, got error", err)
+				continue
+			}
+
+			switch tresponse := response.GetPayload().(type) {
+			case *proto.ResourceChunk_Eof:
+				chanResources <- currentResource
+			case *proto.ResourceChunk_Chunk:
+				// TODO: check the checksum of the chunk...
+				currentResource.contents = append(currentResource.contents, tresponse.Chunk.Chunk...)
+			case *proto.ResourceChunk_Header:
+				currentResource = &testResolvedResource{
+					contents:      []byte{},
+					isDir:         tresponse.Header.IsDir,
+					sourcePath:    tresponse.Header.SourcePath,
+					targetMode:    fs.FileMode(tresponse.Header.FileMode),
+					targetPath:    tresponse.Header.TargetPath,
+					targetUser:    tresponse.Header.TargetUser,
+					targetWorkdir: tresponse.Header.TargetWorkdir,
+				}
+			}
+		}
+
+		close(chanResources)
+
+	}()
+
+	return chanResources, nil
 }
+
 func (c *testClient) StdErr(input []string) error {
 	_, err := c.underlying.StdErr(context.Background(), &proto.LogMessage{Line: input})
 	return err
@@ -251,4 +305,57 @@ func (c *testClient) Abort(input error) error {
 func (c *testClient) Success() error {
 	_, err := c.underlying.Success(context.Background(), &proto.Empty{})
 	return err
+}
+
+// --
+// test resolved resource
+
+type testResolvedResource struct {
+	contents      []byte
+	isDir         bool
+	sourcePath    string
+	targetMode    fs.FileMode
+	targetPath    string
+	targetUser    string
+	targetWorkdir string
+}
+
+type bytesReaderCloser struct {
+	bytesReader *bytes.Reader
+}
+
+func (b *bytesReaderCloser) Close() error {
+	return nil
+}
+
+func (b *bytesReaderCloser) Read(p []byte) (n int, err error) {
+	return b.bytesReader.Read(p)
+}
+
+func (r *testResolvedResource) Contents() (io.ReadCloser, error) {
+	return &bytesReaderCloser{bytesReader: bytes.NewReader(r.contents)}, nil
+}
+
+func (r *testResolvedResource) IsDir() bool {
+	return r.isDir
+}
+
+func (r *testResolvedResource) ResolvedURIOrPath() string {
+	return fmt.Sprintf("grpc://%s", r.sourcePath)
+}
+
+func (r *testResolvedResource) SourcePath() string {
+	return r.sourcePath
+}
+func (drr *testResolvedResource) TargetMode() fs.FileMode {
+	return drr.targetMode
+}
+func (r *testResolvedResource) TargetPath() string {
+	return r.targetPath
+}
+func (r *testResolvedResource) TargetWorkdir() commands.Workdir {
+	return commands.Workdir{Value: r.targetWorkdir}
+}
+func (r *testResolvedResource) TargetUser() commands.User {
+	return commands.User{Value: r.targetUser}
 }
