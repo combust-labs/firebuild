@@ -13,7 +13,6 @@ import (
 	"github.com/combust-labs/firebuild/pkg/build/reader"
 	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/combust-labs/firebuild/pkg/build/server"
-	"github.com/combust-labs/firebuild/pkg/utilstest"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"
 
@@ -136,29 +135,9 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 
 	assert.Nil(t, testClient.NextCommand())
 
-	expectedStderrLines := []string{"stderr line", "stderr line 2"}
-	expectedStdoutLines := []string{"stdout line", "stdout line 2"}
-
-	for _, line := range expectedStderrLines {
-		testClient.StdErr([]string{line})
-	}
-	for _, line := range expectedStdoutLines {
-		testClient.StdOut([]string{line})
-	}
-
-	testClient.Abort(fmt.Errorf("client aborted"))
+	testClient.Success()
 
 	<-testServer.FinishedNotify()
-
-	utilstest.MustEventuallyWithDefaults(t, func() error {
-		if testServer.Aborted() == nil {
-			return fmt.Errorf("expected Aborted() to be not nil")
-		}
-		return nil
-	})
-
-	assert.Equal(t, expectedStderrLines, testServer.ConsumedStderr())
-	assert.Equal(t, expectedStdoutLines, testServer.ConsumedStdout())
 
 }
 

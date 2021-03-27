@@ -104,6 +104,9 @@ func (p *testGRPCServerProvider) Start() {
 				p.abortError = outErr
 				close(p.chanAborted)
 			case <-p.srv.OnSuccess():
+				if p.success {
+					continue
+				}
 				p.success = true
 				go func() {
 					p.srv.Stop()
