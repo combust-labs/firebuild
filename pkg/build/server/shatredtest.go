@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -165,7 +166,7 @@ type TestClient interface {
 	Abort(error) error
 	Commands(*testing.T) error
 	NextCommand() commands.VMInitSerializableCommand
-	Resource(string) (<-chan resources.ResolvedResource, error)
+	Resource(string) (<-chan resources.ResolvedResource, <-chan error, error)
 	StdErr([]string) error
 	StdOut([]string) error
 	Success() error
@@ -240,13 +241,14 @@ func (c *testClient) NextCommand() commands.VMInitSerializableCommand {
 	return result
 }
 
-func (c *testClient) Resource(input string) (<-chan resources.ResolvedResource, error) {
+func (c *testClient) Resource(input string) (<-chan resources.ResolvedResource, <-chan error, error) {
 
 	chanResources := make(chan resources.ResolvedResource)
+	chanError := make(chan error)
 
 	resourceClient, err := c.underlying.Resource(context.Background(), &proto.ResourceRequest{Path: input})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	go func() {
@@ -263,8 +265,8 @@ func (c *testClient) Resource(input string) (<-chan resources.ResolvedResource, 
 
 			// yes, err check after response check
 			if err != nil {
-				//t.Fatal("failed reading chunk from server, got error", err)
-				continue
+				chanError <- errors.Wrap(err, "failed reading chunk")
+				return
 			}
 
 			switch tresponse := response.GetPayload().(type) {
@@ -272,6 +274,11 @@ func (c *testClient) Resource(input string) (<-chan resources.ResolvedResource, 
 				chanResources <- currentResource
 			case *proto.ResourceChunk_Chunk:
 				// TODO: check the checksum of the chunk...
+				hash := sha256.Sum256(tresponse.Chunk.Chunk)
+				if string(hash[:]) != string(currentResource.contents) {
+					chanError <- errors.Wrap(err, "chunk checksum did not match")
+					return
+				}
 				currentResource.contents = append(currentResource.contents, tresponse.Chunk.Chunk...)
 			case *proto.ResourceChunk_Header:
 				currentResource = &testResolvedResource{
@@ -290,7 +297,7 @@ func (c *testClient) Resource(input string) (<-chan resources.ResolvedResource, 
 
 	}()
 
-	return chanResources, nil
+	return chanResources, chanError, nil
 }
 
 func (c *testClient) StdErr(input []string) error {

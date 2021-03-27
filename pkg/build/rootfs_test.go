@@ -100,32 +100,44 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 	if addCommand, ok := nextCommand.(commands.Add); !ok {
 		t.Fatal("expected ADD command")
 	} else {
-		resourceChannel, err := testClient.Resource(addCommand.Source)
+		resourceChannel, errorChannel, err := testClient.Resource(addCommand.Source)
 		if err != nil {
 			t.Fatal("expected resource channel for ADD command, got error", err)
 		}
-		resource := <-resourceChannel
-		resourceData, err := mustReadFromReader(resource.Contents())
-		if err != nil {
-			t.Fatal("expected resource to read, got error", err)
+		select {
+		case err := <-errorChannel:
+			if err != nil {
+				t.Fatal("error while reading resource", err)
+			}
+		case resource := <-resourceChannel:
+			resourceData, err := mustReadFromReader(resource.Contents())
+			if err != nil {
+				t.Fatal("expected resource to read, got error", err)
+			}
+			assert.Equal(t, expectedResource1Bytes, resourceData)
 		}
-		assert.Equal(t, expectedResource1Bytes, resourceData)
 	}
 
 	nextCommand = testClient.NextCommand()
 	if copyCommand, ok := nextCommand.(commands.Copy); !ok {
 		t.Fatal("expected COPY command")
 	} else {
-		resourceChannel, err := testClient.Resource(copyCommand.Source)
+		resourceChannel, errorChannel, err := testClient.Resource(copyCommand.Source)
 		if err != nil {
 			t.Fatal("expected resource channel for ADD command, got error", err)
 		}
-		resource := <-resourceChannel
-		resourceData, err := mustReadFromReader(resource.Contents())
-		if err != nil {
-			t.Fatal("expected resource to read, got error", err)
+		select {
+		case err := <-errorChannel:
+			if err != nil {
+				t.Fatal("error while reading resource", err)
+			}
+		case resource := <-resourceChannel:
+			resourceData, err := mustReadFromReader(resource.Contents())
+			if err != nil {
+				t.Fatal("expected resource to read, got error", err)
+			}
+			assert.Equal(t, expectedResource2Bytes, resourceData)
 		}
-		assert.Equal(t, expectedResource2Bytes, resourceData)
 	}
 
 	nextCommand = testClient.NextCommand()
