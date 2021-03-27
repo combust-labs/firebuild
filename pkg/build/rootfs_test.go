@@ -18,6 +18,8 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func mustNewArg(t *testing.T, rawValue string) commands.Arg {
@@ -62,19 +64,20 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 	}
 
 	grpcConfig := &server.GRPCServiceConfig{
+		ServerName:        "test-grpc-server",
 		BindHostPort:      "127.0.0.1:0",
 		EmbeddedCAKeySize: 1024, // use this low for tests only! low value speeds up tests
 	}
 
-	srv := server.New(grpcConfig, logger.Named("grpc-server"))
-	srv.Start(buildCtx)
+	testServer := server.NewTest(t, logger.Named("grpc-server"), grpcConfig, buildCtx)
+	testServer.Start()
 
 	select {
-	case startErr := <-srv.FailedNotify():
+	case startErr := <-testServer.FailedNotify():
 		t.Fatal("expected the GRPC server to start but it failed", startErr)
-	case <-srv.ReadyNotify():
+	case <-testServer.ReadyNotify():
 		t.Log("GRPC server started and serving on", grpcConfig.BindHostPort)
-		defer srv.Stop()
+		defer testServer.Stop()
 	}
 
 	grpcConn, err := grpc.Dial(grpcConfig.BindHostPort,
@@ -84,6 +87,7 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 	if err != nil {
 		t.Fatal("expected GRPC connection to dial, go error", err)
 	}
+
 	grpcClient := proto.NewRootfsServerClient(grpcConn)
 
 	response, err := grpcClient.Commands(context.Background(), &proto.Empty{})
@@ -134,8 +138,32 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 					"workdir", tresponse.Header.TargetWorkdir)
 			}
 		}
-
 	}
+
+	expectedStderrLines := []string{"stderr line", "stderr line 2"}
+	expectedStdoutLines := []string{"stdout line", "stdout line 2"}
+
+	for _, line := range expectedStderrLines {
+		grpcClient.StdErr(context.Background(), &proto.LogMessage{
+			Line: []string{line},
+		})
+	}
+	for _, line := range expectedStdoutLines {
+		grpcClient.StdOut(context.Background(), &proto.LogMessage{
+			Line: []string{line},
+		})
+	}
+
+	grpcClient.Abort(context.Background(), &proto.AbortRequest{
+		Error: "client aborted",
+	})
+
+	<-testServer.FinishedNotify()
+
+	assert.NotNil(t, testServer.Aborted())
+	assert.Equal(t, expectedStderrLines, testServer.ConsumedStderr())
+	assert.Equal(t, expectedStdoutLines, testServer.ConsumedStdout())
+
 }
 
 func TestDockerignoreMatches(t *testing.T) {

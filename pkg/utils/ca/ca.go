@@ -221,7 +221,7 @@ func (eca *defaultEmbeddedCA) getRootCACertTemplate() *x509.Certificate {
 			ExtraExtensions: []pkix.Extension{{
 				Id:       asn1.ObjectIdentifier{2, 5, 29, 17},
 				Critical: false,
-				Value:    []byte(`email:in...@dexample.de, URI:http://ca.example.com/`),
+				Value:    []byte(`email:in...@example.com, URI:http://ca.example.com/`),
 			}},
 		*/
 	})

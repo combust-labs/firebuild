@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/combust-labs/firebuild/grpc/proto"
 	"github.com/gofrs/uuid"
@@ -27,9 +28,13 @@ type EventProvider interface {
 type serverImplInterface interface {
 	proto.RootfsServerServer
 	EventProvider
+	Stop()
 }
 
 type serverImpl struct {
+	m       *sync.Mutex
+	stopped bool
+
 	logger        hclog.Logger
 	serviceConfig *GRPCServiceConfig
 	serverCtx     *WorkContext
@@ -42,6 +47,7 @@ type serverImpl struct {
 
 func newServerImpl(logger hclog.Logger, serverCtx *WorkContext, serviceConfig *GRPCServiceConfig) serverImplInterface {
 	return &serverImpl{
+		m:             &sync.Mutex{},
 		logger:        logger,
 		serviceConfig: serviceConfig,
 		serverCtx:     serverCtx,
@@ -53,6 +59,13 @@ func newServerImpl(logger hclog.Logger, serverCtx *WorkContext, serviceConfig *G
 }
 
 func (impl *serverImpl) Abort(ctx context.Context, req *proto.AbortRequest) (*proto.Empty, error) {
+	impl.m.Lock()
+	if impl.stopped {
+		defer impl.m.Unlock()
+		return &proto.Empty{}, nil
+	}
+	impl.m.Unlock()
+
 	impl.chanAbort <- errors.New(req.Error)
 	return &proto.Empty{}, nil
 }
@@ -135,22 +148,58 @@ func (impl *serverImpl) Resource(req *proto.ResourceRequest, stream proto.Rootfs
 }
 
 func (impl *serverImpl) StdErr(ctx context.Context, req *proto.LogMessage) (*proto.Empty, error) {
-	for _, line := range req.Line {
-		impl.chanStdout <- line
+	impl.m.Lock()
+	if impl.stopped {
+		defer impl.m.Unlock()
+		return &proto.Empty{}, nil
 	}
-	return nil, nil
+	impl.m.Unlock()
+
+	for _, line := range req.Line {
+		impl.chanStderr <- line
+	}
+	return &proto.Empty{}, nil
 }
 
 func (impl *serverImpl) StdOut(ctx context.Context, req *proto.LogMessage) (*proto.Empty, error) {
+	impl.m.Lock()
+	if impl.stopped {
+		defer impl.m.Unlock()
+		return &proto.Empty{}, nil
+	}
+	impl.m.Unlock()
+
 	for _, line := range req.Line {
 		impl.chanStdout <- line
 	}
-	return nil, nil
+	return &proto.Empty{}, nil
+}
+
+func (impl *serverImpl) Stop() {
+	impl.m.Lock()
+	if impl.stopped {
+		impl.m.Unlock()
+		return
+	}
+	impl.stopped = true
+	impl.m.Unlock()
+
+	close(impl.chanAbort)
+	close(impl.chanStderr)
+	close(impl.chanStdout)
+	close(impl.chanSuccess)
 }
 
 func (impl *serverImpl) Success(ctx context.Context, _ *proto.Empty) (*proto.Empty, error) {
+	impl.m.Lock()
+	if impl.stopped {
+		defer impl.m.Unlock()
+		return &proto.Empty{}, nil
+	}
+	impl.m.Unlock()
+
 	close(impl.chanSuccess)
-	return nil, nil
+	return &proto.Empty{}, nil
 }
 
 func (impl *serverImpl) OnAbort() <-chan error {

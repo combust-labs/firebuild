@@ -141,7 +141,11 @@ func (s *grpcSvc) Start(serverCtx *WorkContext) {
 			// if there is no server TLS config, generate a new runtime CA
 			// and create a new server and client TLS config
 
-			embeddedCA, embeddedCAErr := ca.NewDefaultEmbeddedCAWithLogger(&ca.EmbeddedCAConfig{KeySize: s.config.EmbeddedCAKeySize}, s.logger.Named("embdedded-ca"))
+			embeddedCA, embeddedCAErr := ca.NewDefaultEmbeddedCAWithLogger(&ca.
+				EmbeddedCAConfig{
+				Addresses: []string{s.config.ServerName},
+				KeySize:   s.config.EmbeddedCAKeySize,
+			}, s.logger.Named("embdedded-ca"))
 			if embeddedCAErr != nil {
 				s.chanFailed <- embeddedCAErr
 				return
@@ -256,6 +260,7 @@ func (s *grpcSvc) Stop() {
 	if s.running {
 
 		s.logger.Info("attempting graceful stop")
+		s.svc.Stop()
 
 		chanSignal := make(chan struct{})
 		go func() {
