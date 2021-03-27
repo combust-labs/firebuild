@@ -62,7 +62,7 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 	}
 
 	grpcConfig := &server.GRPCServiceConfig{
-		BindHostPort: "127.0.0.1:5000",
+		BindHostPort: "127.0.0.1:0",
 	}
 
 	srv := server.New(grpcConfig, logger.Named("grpc-server"))
