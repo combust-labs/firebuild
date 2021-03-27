@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/combust-labs/firebuild-embedded-ca/ca"
 	"github.com/combust-labs/firebuild/grpc/proto"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/resources"
-	"github.com/combust-labs/firebuild/pkg/utils/ca"
 	"github.com/hashicorp/go-hclog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -154,13 +154,13 @@ func (s *grpcSvc) Start(serverCtx *WorkContext) {
 
 			serverTLSConfig, err := embeddedCA.NewServerCertTLSConfig()
 			if err != nil {
-				s.chanFailed <- embeddedCAErr
+				s.chanFailed <- err
 				return
 			}
 
 			clientTLSConfig, err := embeddedCA.NewClientCertTLSConfig(s.config.ServerName)
 			if err != nil {
-				s.chanFailed <- embeddedCAErr
+				s.chanFailed <- err
 				return
 			}
 

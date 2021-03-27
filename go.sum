@@ -198,6 +198,8 @@ github.com/cncf/udpa/go v0.0.0-20201120205902-5459f2c99403/go.mod h1:WmhPx2Nbnht
 github.com/cockroachdb/datadriven v0.0.0-20190809214429-80d97fb3cbaa/go.mod h1:zn76sxSg3SzpJ0PPJaLDCu+Bu0Lg3sKTORVIj19EIF8=
 github.com/codahale/hdrhistogram v0.0.0-20160425231609-f8ad88b59a58 h1:hHWif/4GirK3P5uvCyyj941XSVIQDzuJhbEguCICdPE=
 github.com/codahale/hdrhistogram v0.0.0-20160425231609-f8ad88b59a58/go.mod h1:sE/e/2PUdi/liOCUjSTXgM1o87ZssimdTWN964YiIeI=
+github.com/combust-labs/firebuild-embedded-ca v0.0.1 h1:NnHilLnn6Hlj5NX7rRjEvqZuKqm/1TcFFJ7r8wPTGUY=
+github.com/combust-labs/firebuild-embedded-ca v0.0.1/go.mod h1:aX6H7DxiBXhYwBHxe2IVlJf2vwMz9SaQtK9O/3VAHdU=
 github.com/combust-labs/firebuild-mmds v0.0.3 h1:/OFryxpT76sUxHJBw0ccdtKN3dMUp4dvT+ayBeSuYzQ=
 github.com/combust-labs/firebuild-mmds v0.0.3/go.mod h1:2Fvj2vc7AqWOVPjq9TkUKTn0qwyv7hW5cG2bTVPs9ws=
 github.com/containerd/cgroups v0.0.0-20190919134610-bf292b21730f/go.mod h1:OApqhQ4XNSNC13gXIwDjhOQxjWa/NxkwZXJ1EvqT0ko=
