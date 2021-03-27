@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+type VMInitSerializableCommand interface{}
+
 // DockerfileSerializable identifies a command originating from a Docker environment: file or image.
 // Identifies Docker commands.
 type DockerfileSerializable interface {
@@ -14,13 +16,14 @@ type DockerfileSerializable interface {
 
 // Add represents the ADD instruction.
 type Add struct {
-	OriginalCommand    string  `json:"OriginalCommand" mapstructure:"OriginalCommand"`
-	OriginalSource     string  `json:"OriginalSource" mapstructure:"OriginalSource"`
-	Source             string  `json:"Source" mapstructure:"Source"`
-	Target             string  `json:"Target" mapstructure:"Target"`
-	Workdir            Workdir `json:"Workdir" mapstructure:"Workdir"`
-	User               User    `json:"User" mapstructure:"User"`
-	UserFromLocalChown *User   `json:"UserFromLocalChown" mapstructure:"UserFromLocalChown"`
+	VMInitSerializableCommand `json:"-" mapstructure:"-"`
+	OriginalCommand           string  `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	OriginalSource            string  `json:"OriginalSource" mapstructure:"OriginalSource"`
+	Source                    string  `json:"Source" mapstructure:"Source"`
+	Target                    string  `json:"Target" mapstructure:"Target"`
+	Workdir                   Workdir `json:"Workdir" mapstructure:"Workdir"`
+	User                      User    `json:"User" mapstructure:"User"`
+	UserFromLocalChown        *User   `json:"UserFromLocalChown" mapstructure:"UserFromLocalChown"`
 }
 
 // GetOriginal returns the original string command the command was parsed from.
@@ -82,14 +85,15 @@ func (cmd Cmd) GetOriginal() string {
 
 // Copy represents the COPY instruction.
 type Copy struct {
-	OriginalCommand    string  `json:"OriginalCommand" mapstructure:"OriginalCommand"`
-	OriginalSource     string  `json:"OriginalSource" mapstructure:"OriginalSource"`
-	Source             string  `json:"Source" mapstructure:"Source"`
-	Stage              string  `json:"Stage" mapstructure:"Stage"`
-	Target             string  `json:"Target" mapstructure:"Target"`
-	Workdir            Workdir `json:"Workdir" mapstructure:"Workdir"`
-	User               User    `json:"User" mapstructure:"User"`
-	UserFromLocalChown *User   `json:"UserFromLocalChown" mapstructure:"UserFromLocalChown"`
+	VMInitSerializableCommand `json:"-" mapstructure:"-"`
+	OriginalCommand           string  `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	OriginalSource            string  `json:"OriginalSource" mapstructure:"OriginalSource"`
+	Source                    string  `json:"Source" mapstructure:"Source"`
+	Stage                     string  `json:"Stage" mapstructure:"Stage"`
+	Target                    string  `json:"Target" mapstructure:"Target"`
+	Workdir                   Workdir `json:"Workdir" mapstructure:"Workdir"`
+	User                      User    `json:"User" mapstructure:"User"`
+	UserFromLocalChown        *User   `json:"UserFromLocalChown" mapstructure:"UserFromLocalChown"`
 }
 
 // GetOriginal returns the original string command the command was parsed from.
@@ -197,13 +201,14 @@ func (cmd Label) GetOriginal() string {
 
 // Run represents the RUN instruction.
 type Run struct {
-	OriginalCommand string            `json:"OriginalCommand" mapstructure:"OriginalCommand"`
-	Args            map[string]string `json:"Args" mapstructure:"Args"`
-	Command         string            `json:"Command" mapstructure:"Command"`
-	Env             map[string]string `json:"Env" mapstructure:"Env"`
-	Shell           Shell             `json:"Shell" mapstructure:"Shell"`
-	Workdir         Workdir           `json:"Workdir" mapstructure:"Workdir"`
-	User            User              `json:"User" mapstructure:"User"`
+	VMInitSerializableCommand `json:"-" mapstructure:"-"`
+	OriginalCommand           string            `json:"OriginalCommand" mapstructure:"OriginalCommand"`
+	Args                      map[string]string `json:"Args" mapstructure:"Args"`
+	Command                   string            `json:"Command" mapstructure:"Command"`
+	Env                       map[string]string `json:"Env" mapstructure:"Env"`
+	Shell                     Shell             `json:"Shell" mapstructure:"Shell"`
+	Workdir                   Workdir           `json:"Workdir" mapstructure:"Workdir"`
+	User                      User              `json:"User" mapstructure:"User"`
 }
 
 // GetOriginal returns the original string command the command was parsed from.

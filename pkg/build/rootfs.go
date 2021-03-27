@@ -59,7 +59,7 @@ type defaultBuild struct {
 func (b *defaultBuild) CreateContext(dependencies server.Resources) (*server.WorkContext, error) {
 
 	ctx := &server.WorkContext{
-		ExecutableCommands: []interface{}{},
+		ExecutableCommands: []commands.VMInitSerializableCommand{},
 		ResourcesResolved:  make(server.Resources),
 	}
 

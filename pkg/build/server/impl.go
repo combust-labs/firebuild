@@ -183,11 +183,6 @@ func (impl *serverImpl) Stop() {
 	}
 	impl.stopped = true
 	impl.m.Unlock()
-
-	close(impl.chanAbort)
-	close(impl.chanStderr)
-	close(impl.chanStdout)
-	close(impl.chanSuccess)
 }
 
 func (impl *serverImpl) Success(ctx context.Context, _ *proto.Empty) (*proto.Empty, error) {

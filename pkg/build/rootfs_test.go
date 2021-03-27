@@ -1,7 +1,6 @@
 package build
 
 import (
-	"context"
 	"fmt"
 	"io/fs"
 	"io/ioutil"
@@ -9,15 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/combust-labs/firebuild/grpc/proto"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/reader"
 	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/combust-labs/firebuild/pkg/build/server"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -69,7 +65,7 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 		EmbeddedCAKeySize: 1024, // use this low for tests only! low value speeds up tests
 	}
 
-	testServer := server.NewTest(t, logger.Named("grpc-server"), grpcConfig, buildCtx)
+	testServer := server.NewTestServer(t, logger.Named("grpc-server"), grpcConfig, buildCtx)
 	testServer.Start()
 
 	select {
@@ -80,87 +76,122 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 		defer testServer.Stop()
 	}
 
-	grpcConn, err := grpc.Dial(grpcConfig.BindHostPort,
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(grpcConfig.MaxRecvMsgSize)),
-		grpc.WithTransportCredentials(credentials.NewTLS(grpcConfig.TLSConfigClient)))
-
-	if err != nil {
-		t.Fatal("expected GRPC connection to dial, go error", err)
+	testClient, clientErr := server.NewTestClient(t, logger.Named("grpc-client"), grpcConfig)
+	if clientErr != nil {
+		t.Fatal("expected the GRPC client, got error", clientErr)
 	}
 
-	grpcClient := proto.NewRootfsServerClient(grpcConn)
-
-	response, err := grpcClient.Commands(context.Background(), &proto.Empty{})
-	if err != nil {
-		t.Fatal("expected GRPC client Commands() to return, go error", err)
+	opErr := testClient.Commands(t)
+	if opErr != nil {
+		t.Fatal("GRPC client Commands() opErr", opErr)
 	}
 
-	for _, cmd := range response.Command {
-		t.Log("Command", cmd)
+	nextCommand := testClient.NextCommand()
+	if _, ok := nextCommand.(commands.Run); !ok {
+		t.Fatal("expected RUN command")
 	}
 
-	for _, resourcePath := range []string{"resource1", "resource2"} {
+	nextCommand = testClient.NextCommand()
+	if _, ok := nextCommand.(commands.Add); !ok {
+		t.Fatal("expected ADD command")
+	}
 
-		resourceClient, err := grpcClient.Resource(context.Background(), &proto.ResourceRequest{
-			Path: resourcePath,
-		})
+	nextCommand = testClient.NextCommand()
+	if _, ok := nextCommand.(commands.Copy); !ok {
+		t.Fatal("expected COPY command")
+	}
+
+	nextCommand = testClient.NextCommand()
+	if _, ok := nextCommand.(commands.Run); !ok {
+		t.Fatal("expected RUN command")
+	}
+
+	assert.Nil(t, testClient.NextCommand())
+
+	/*
+		t.Log(" ==============> WHOA...", commands)
+
+		grpcConn, err := grpc.Dial(grpcConfig.BindHostPort,
+			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(grpcConfig.MaxRecvMsgSize)),
+			grpc.WithTransportCredentials(credentials.NewTLS(grpcConfig.TLSConfigClient)))
 
 		if err != nil {
-			t.Fatal("expected resource to be read from GRPC, got error", err)
+			t.Fatal("expected GRPC connection to dial, go error", err)
 		}
 
-		for {
-			response, err := resourceClient.Recv()
+		grpcClient := proto.NewRootfsServerClient(grpcConn)
 
-			if response == nil {
-				resourceClient.CloseSend()
-				break
-			}
+		response, err := grpcClient.Commands(context.Background(), &proto.Empty{})
+		if err != nil {
+			t.Fatal("expected GRPC client Commands() to return, go error", err)
+		}
 
-			// yes, err check after response check
+		for _, cmd := range response.Command {
+			t.Log("Command", cmd)
+		}
+
+		for _, resourcePath := range []string{"resource1", "resource2"} {
+
+			resourceClient, err := grpcClient.Resource(context.Background(), &proto.ResourceRequest{
+				Path: resourcePath,
+			})
+
 			if err != nil {
-				t.Fatal("failed reading chunk from server, got error", err)
+				t.Fatal("expected resource to be read from GRPC, got error", err)
 			}
 
-			switch tresponse := response.GetPayload().(type) {
-			case *proto.ResourceChunk_Eof:
-				t.Log(" ===============> finished file", tresponse.Eof.Id, "for", resourcePath)
-			case *proto.ResourceChunk_Chunk:
-				t.Log(" ===============> received chunk", tresponse.Chunk.Id,
-					"chunk", string(tresponse.Chunk.Chunk),
-					"checksum", string(tresponse.Chunk.Checksum))
-			case *proto.ResourceChunk_Header:
-				t.Log(" ===============> new file", tresponse.Header.SourcePath,
-					"target", tresponse.Header.TargetPath,
-					"mode", fs.FileMode(tresponse.Header.FileMode),
-					"isDir", tresponse.Header.IsDir,
-					"user", tresponse.Header.TargetUser,
-					"workdir", tresponse.Header.TargetWorkdir)
+			for {
+				response, err := resourceClient.Recv()
+
+				if response == nil {
+					resourceClient.CloseSend()
+					break
+				}
+
+				// yes, err check after response check
+				if err != nil {
+					t.Fatal("failed reading chunk from server, got error", err)
+				}
+
+				switch tresponse := response.GetPayload().(type) {
+				case *proto.ResourceChunk_Eof:
+					t.Log(" ===============> finished file", tresponse.Eof.Id, "for", resourcePath)
+				case *proto.ResourceChunk_Chunk:
+					t.Log(" ===============> received chunk", tresponse.Chunk.Id,
+						"chunk", string(tresponse.Chunk.Chunk),
+						"checksum", string(tresponse.Chunk.Checksum))
+				case *proto.ResourceChunk_Header:
+					t.Log(" ===============> new file", tresponse.Header.SourcePath,
+						"target", tresponse.Header.TargetPath,
+						"mode", fs.FileMode(tresponse.Header.FileMode),
+						"isDir", tresponse.Header.IsDir,
+						"user", tresponse.Header.TargetUser,
+						"workdir", tresponse.Header.TargetWorkdir)
+				}
 			}
-		}
-	}
+		}*/
 
 	expectedStderrLines := []string{"stderr line", "stderr line 2"}
 	expectedStdoutLines := []string{"stdout line", "stdout line 2"}
 
 	for _, line := range expectedStderrLines {
-		grpcClient.StdErr(context.Background(), &proto.LogMessage{
-			Line: []string{line},
-		})
+		testClient.StdErr([]string{line})
 	}
 	for _, line := range expectedStdoutLines {
-		grpcClient.StdOut(context.Background(), &proto.LogMessage{
-			Line: []string{line},
-		})
+		testClient.StdOut([]string{line})
 	}
 
-	grpcClient.Abort(context.Background(), &proto.AbortRequest{
-		Error: "client aborted",
-	})
+	testClient.Abort(fmt.Errorf("client aborted"))
 
 	<-testServer.FinishedNotify()
-
-	assert.NotNil(t, testServer.Aborted())
+	/*
+		utilstest.MustEventuallyWithDefaults(t, func() error {
+			if testServer.Aborted() == nil {
+				return fmt.Errorf("expected Aborted() to be not nil")
+			}
+			return nil
+		})
+	*/
 	assert.Equal(t, expectedStderrLines, testServer.ConsumedStderr())
 	assert.Equal(t, expectedStdoutLines, testServer.ConsumedStdout())
 

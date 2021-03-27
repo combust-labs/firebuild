@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/combust-labs/firebuild/grpc/proto"
+	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/combust-labs/firebuild/pkg/utils/ca"
 	"github.com/hashicorp/go-hclog"
@@ -87,7 +88,7 @@ type Resources = map[string][]resources.ResolvedResource
 
 // WorkContext contains the information for the bootstrap work to execute.
 type WorkContext struct {
-	ExecutableCommands []interface{}
+	ExecutableCommands []commands.VMInitSerializableCommand
 	ResourcesResolved  Resources
 }
 

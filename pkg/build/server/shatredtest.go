@@ -1,9 +1,19 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/combust-labs/firebuild/grpc/proto"
+	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/hashicorp/go-hclog"
+	"github.com/mitchellh/mapstructure"
+	"github.com/pkg/errors"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // TestingServerProvider wraps an instance of a server and provides testing
@@ -22,13 +32,14 @@ type TestingServerProvider interface {
 }
 
 // NewTest starts a new test server provider.
-func NewTest(t *testing.T, logger hclog.Logger, cfg *GRPCServiceConfig, ctx *WorkContext) *testGRPCServerProvider {
+func NewTestServer(t *testing.T, logger hclog.Logger, cfg *GRPCServiceConfig, ctx *WorkContext) *testGRPCServerProvider {
 	return &testGRPCServerProvider{
 		cfg:          cfg,
 		ctx:          ctx,
 		logger:       logger,
 		stdErrOutput: []string{},
 		stdOutOutput: []string{},
+		chanAborted:  make(chan struct{}),
 		chanFailed:   make(chan error, 1),
 		chanFinished: make(chan struct{}),
 		chanReady:    make(chan struct{}),
@@ -47,9 +58,12 @@ type testGRPCServerProvider struct {
 	stdOutOutput []string
 	success      bool
 
+	chanAborted  chan struct{}
 	chanFailed   chan error
 	chanFinished chan struct{}
 	chanReady    chan struct{}
+
+	isAbortedClosed bool
 }
 
 // Start starts a testing server.
@@ -71,7 +85,6 @@ func (p *testGRPCServerProvider) Start() {
 			select {
 			case <-p.srv.StoppedNotify():
 				close(p.chanFinished)
-				close(p.chanFailed)
 				break out
 			case stdErrLine := <-p.srv.OnStderr():
 				if stdErrLine == "" {
@@ -85,10 +98,20 @@ func (p *testGRPCServerProvider) Start() {
 				p.stdOutOutput = append(p.stdOutOutput, stdOutLine)
 			case outErr := <-p.srv.OnAbort():
 				p.abortError = outErr
-				p.srv.Stop()
+				close(p.chanAborted)
 			case <-p.srv.OnSuccess():
 				p.success = true
-				p.srv.Stop()
+				go func() {
+					p.srv.Stop()
+				}()
+			case <-p.chanAborted:
+				if p.isAbortedClosed {
+					continue
+				}
+				p.isAbortedClosed = true
+				go func() {
+					p.srv.Stop()
+				}()
 			}
 		}
 	}()
@@ -127,4 +150,105 @@ func (p *testGRPCServerProvider) ConsumedStdout() []string {
 }
 func (p *testGRPCServerProvider) Succeeded() bool {
 	return p.success
+}
+
+// -- test client
+
+type TestClient interface {
+	Abort(error) error
+	Commands(*testing.T) error
+	NextCommand() commands.VMInitSerializableCommand
+	Resource(string) (proto.RootfsServer_ResourceClient, error)
+	StdErr([]string) error
+	StdOut([]string) error
+	Success() error
+}
+
+func NewTestClient(t *testing.T, logger hclog.Logger, cfg *GRPCServiceConfig) (TestClient, error) {
+	grpcConn, err := grpc.Dial(cfg.BindHostPort,
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(cfg.MaxRecvMsgSize)),
+		grpc.WithTransportCredentials(credentials.NewTLS(cfg.TLSConfigClient)))
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &testClient{underlying: proto.NewRootfsServerClient(grpcConn)}, nil
+}
+
+type testClient struct {
+	underlying      proto.RootfsServerClient
+	fetchedCommands []commands.VMInitSerializableCommand
+}
+
+func (c *testClient) Commands(t *testing.T) error {
+	c.fetchedCommands = []commands.VMInitSerializableCommand{}
+	response, err := c.underlying.Commands(context.Background(), &proto.Empty{})
+	if err != nil {
+		return err
+	}
+	for _, cmd := range response.Command {
+		rawItem := map[string]interface{}{}
+		if err := json.Unmarshal([]byte(cmd), &rawItem); err != nil {
+			return err
+		}
+
+		if originalCommandString, ok := rawItem["OriginalCommand"]; ok {
+			if strings.HasPrefix(fmt.Sprintf("%s", originalCommandString), "ADD") {
+				command := commands.Add{}
+				if err := mapstructure.Decode(rawItem, &command); err != nil {
+					return errors.Wrap(err, "found ADD but did not deserialize")
+				}
+				c.fetchedCommands = append(c.fetchedCommands, command)
+			} else if strings.HasPrefix(fmt.Sprintf("%s", originalCommandString), "COPY") {
+				command := commands.Copy{}
+				if err := mapstructure.Decode(rawItem, &command); err != nil {
+					return errors.Wrap(err, "found COPY but did not deserialize")
+				}
+				c.fetchedCommands = append(c.fetchedCommands, command)
+			} else if strings.HasPrefix(fmt.Sprintf("%s", originalCommandString), "RUN") {
+				command := commands.Run{}
+				if err := mapstructure.Decode(rawItem, &command); err != nil {
+					return errors.Wrap(err, "found RUN but did not deserialize")
+				}
+				c.fetchedCommands = append(c.fetchedCommands, command)
+			} else {
+				t.Log("unexpected command from grpc:", rawItem)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *testClient) NextCommand() commands.VMInitSerializableCommand {
+	if len(c.fetchedCommands) == 0 {
+		return nil
+	}
+	result := c.fetchedCommands[0]
+	if len(c.fetchedCommands) == 1 {
+		c.fetchedCommands = []commands.VMInitSerializableCommand{}
+	} else {
+		c.fetchedCommands = c.fetchedCommands[1:]
+	}
+	return result
+}
+
+func (c *testClient) Resource(input string) (proto.RootfsServer_ResourceClient, error) {
+	return c.underlying.Resource(context.Background(), &proto.ResourceRequest{Path: input})
+}
+func (c *testClient) StdErr(input []string) error {
+	_, err := c.underlying.StdErr(context.Background(), &proto.LogMessage{Line: input})
+	return err
+}
+func (c *testClient) StdOut(input []string) error {
+	_, err := c.underlying.StdOut(context.Background(), &proto.LogMessage{Line: input})
+	return err
+}
+func (c *testClient) Abort(input error) error {
+	_, err := c.underlying.Abort(context.Background(), &proto.AbortRequest{Error: input.Error()})
+	return err
+}
+func (c *testClient) Success() error {
+	_, err := c.underlying.Success(context.Background(), &proto.Empty{})
+	return err
 }
