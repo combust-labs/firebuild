@@ -27,6 +27,9 @@ const (
 type GRPCServiceConfig struct {
 	// Host and port to bind on
 	BindHostPort string
+	// When no TLSConfigServer is given, server uses an embedded CA.
+	// This property sets the RSA key size, default is 4096 bytes.
+	EmbeddedCAKeySize int
 	// How long to wait for the GRPC server to shutdown
 	// before stopping forcefully.
 	GracefulStopTimeoutMillis int
@@ -138,7 +141,7 @@ func (s *grpcSvc) Start(serverCtx *WorkContext) {
 			// if there is no server TLS config, generate a new runtime CA
 			// and create a new server and client TLS config
 
-			embeddedCA, embeddedCAErr := ca.NewDefaultEmbeddedCAWithLogger(&ca.EmbeddedCAConfig{}, s.logger.Named("embdedded-ca"))
+			embeddedCA, embeddedCAErr := ca.NewDefaultEmbeddedCAWithLogger(&ca.EmbeddedCAConfig{KeySize: s.config.EmbeddedCAKeySize}, s.logger.Named("embdedded-ca"))
 			if embeddedCAErr != nil {
 				s.chanFailed <- embeddedCAErr
 				return

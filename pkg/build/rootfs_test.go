@@ -62,7 +62,8 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 	}
 
 	grpcConfig := &server.GRPCServiceConfig{
-		BindHostPort: "127.0.0.1:0",
+		BindHostPort:      "127.0.0.1:0",
+		EmbeddedCAKeySize: 1024, // use this low for tests only! low value speeds up tests
 	}
 
 	srv := server.New(grpcConfig, logger.Named("grpc-server"))
