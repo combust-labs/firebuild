@@ -14,8 +14,6 @@ import (
 	"github.com/hashicorp/go-hclog"
 )
 
-// TODO: handle closing of channels when the owning server is closed.
-
 // EventProvider provides the event subsriptions to the server executor.
 // When client event occurs, a corresponding event will be sent via one of the channels.
 type EventProvider interface {

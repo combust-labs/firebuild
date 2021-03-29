@@ -51,9 +51,9 @@ func (ddb *defaultDependencyBuild) Build(externalCopies []commands.Copy) ([]reso
 		return emptyResponse, fmt.Errorf("error fetching Docker client: %+v", clientErr)
 	}
 
-	// TODO: verify that this is actually possible with Docker.
 	// Do not return early, maybe somebody attempts to build a base image
 	// using the multistage build but without extracting actual resources.
+	// This is perfectly possible with Docker.
 
 	// The cloned sources reside in .../sources directory, let's write our stage Dockerfile in there
 	randFileName := strings.ToLower(utils.RandStringBytes(32))

@@ -159,7 +159,7 @@ func (b *defaultBuild) CreateContext(dependencies server.Resources) (*server.Wor
 						ctx.ResourcesResolved[sourcePath] = []resources.ResolvedResource{dependencyResource}
 
 						ctx.ExecutableCommands = append(ctx.ExecutableCommands, commands.Copy{
-							OriginalCommand:    "",
+							OriginalCommand:    tcommand.OriginalCommand,
 							OriginalSource:     dependencyResource.ResolvedURIOrPath(),
 							Source:             sourcePath,
 							Target:             dependencyResource.TargetPath(),

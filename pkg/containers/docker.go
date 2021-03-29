@@ -415,6 +415,9 @@ func ImageExportStageDependentResources(ctx context.Context, client *docker.Clie
 						if !layerHeader.FileInfo().IsDir() {
 							// gotta read the file...
 							opLogger.Debug("reading file", "layer", layerHeader.Name, "matched-prefix", opCopy.Source)
+							// --
+							// CONSIDER: saving the files in a stage derived directory:
+							// --
 							targetPath := filepath.Join(exportsRoot, layerHeader.Name)
 							// make sure we have the parent directory for the target:
 							if parentDirErr := os.MkdirAll(filepath.Dir(targetPath), fs.ModePerm); err != nil {

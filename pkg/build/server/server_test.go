@@ -15,7 +15,7 @@ type eventuallyFunc func() error
 func TestServerNoContentOpsAbort(t *testing.T) {
 	testWithStopType(t, func(client TestClient) {
 		client.Abort(fmt.Errorf("aborted"))
-	}, func(server TestingServerProvider) eventuallyFunc {
+	}, func(server TestServer) eventuallyFunc {
 		return func() error {
 			if server.Aborted() == nil {
 				return fmt.Errorf("expected Aborted() to be not nil")
@@ -28,7 +28,7 @@ func TestServerNoContentOpsAbort(t *testing.T) {
 func TestServerNoContentOpsSuccess(t *testing.T) {
 	testWithStopType(t, func(client TestClient) {
 		client.Success()
-	}, func(server TestingServerProvider) eventuallyFunc {
+	}, func(server TestServer) eventuallyFunc {
 		return func() error {
 			if !server.Succeeded() {
 				return fmt.Errorf("expected Succeeded() to be true")
@@ -38,7 +38,7 @@ func TestServerNoContentOpsSuccess(t *testing.T) {
 	})
 }
 
-func testWithStopType(t *testing.T, stopTrigger func(TestClient), eventuallyCond func(TestingServerProvider) eventuallyFunc) {
+func testWithStopType(t *testing.T, stopTrigger func(TestClient), eventuallyCond func(TestServer) eventuallyFunc) {
 	logger := hclog.Default()
 	logger.SetLevel(hclog.Debug)
 
@@ -47,27 +47,8 @@ func testWithStopType(t *testing.T, stopTrigger func(TestClient), eventuallyCond
 		ResourcesResolved:  make(Resources),
 	}
 
-	grpcConfig := &GRPCServiceConfig{
-		ServerName:        "test-grpc-server",
-		BindHostPort:      "127.0.0.1:0",
-		EmbeddedCAKeySize: 1024, // use this low for tests only! low value speeds up tests
-	}
-
-	testServer := NewTestServer(t, logger.Named("grpc-server"), grpcConfig, buildCtx)
-	testServer.Start()
-
-	select {
-	case startErr := <-testServer.FailedNotify():
-		t.Fatal("expected the GRPC server to start but it failed", startErr)
-	case <-testServer.ReadyNotify():
-		t.Log("GRPC server started and serving on", grpcConfig.BindHostPort)
-		defer testServer.Stop()
-	}
-
-	testClient, clientErr := NewTestClient(t, logger.Named("grpc-client"), grpcConfig)
-	if clientErr != nil {
-		t.Fatal("expected the GRPC client, got error", clientErr)
-	}
+	testServer, testClient, cleanupFunc := MustStartTestGRPCServer(t, logger, buildCtx)
+	defer cleanupFunc()
 
 	expectedStderrLines := []string{"stderr line", "stderr line 2"}
 	expectedStdoutLines := []string{"stdout line", "stdout line 2"}
