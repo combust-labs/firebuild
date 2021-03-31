@@ -103,8 +103,15 @@ func TestContextBuilderMultiStageWithResources(t *testing.T) {
 		mustBeRunCommand(tt, testClient)
 		mustBeAddCommand(tt, testClient, expectedResource1Bytes)
 		mustBeCopyCommand(tt, testClient, expectedResource2Bytes)
-		// TODO-MULTI-STAGE-VMINIT: this does not do yet what it should:
-		mustBeCopyCommand(tt, testClient, []byte("etc/test/file1"), []byte("etc/test/file2"), []byte("etc/test/subdir/subdir-file1"))
+		// directories do not have a byte content, they always return empty bytes:
+		// since we have:
+		// - /etc/test: dir
+		// - /etc/test/file1: file
+		// - /etc/test/file2: file
+		// - /etc/test/subdir: dir
+		// - /etc/test/subdir/subdir-file1: file
+		// we expect the following:
+		mustBeCopyCommand(tt, testClient, []byte{}, []byte("etc/test/file1"), []byte("etc/test/file2"), []byte{}, []byte("etc/test/subdir/subdir-file1"))
 		mustBeRunCommand(tt, testClient)
 		assert.Nil(tt, testClient.NextCommand())
 
@@ -219,31 +226,7 @@ func mustBeAddCommand(t *testing.T, testClient server.TestClient, expectedConten
 	if addCommand, ok := testClient.NextCommand().(commands.Add); !ok {
 		t.Fatal("expected ADD command")
 	} else {
-		resourceChannel, err := testClient.Resource(addCommand.Source)
-		if err != nil {
-			t.Fatal("expected resource channel for ADD command, got error", err)
-		}
-
-		idx := 0
-	out:
-		for {
-			select {
-			case item := <-resourceChannel:
-				switch titem := item.(type) {
-				case nil:
-					break out // break out on nil
-				case resources.ResolvedResource:
-					resourceData, err := mustReadFromReader(titem.Contents())
-					if err != nil {
-						t.Fatal("expected resource to read, got error", err)
-					}
-					assert.Equal(t, expectedContents[idx], resourceData)
-					idx = idx + 1
-				case error:
-					t.Fatal("received an error while reading ADD resource", titem)
-				}
-			}
-		}
+		mustReadResources(t, testClient, addCommand.Source, expectedContents...)
 
 	}
 }
@@ -252,41 +235,35 @@ func mustBeCopyCommand(t *testing.T, testClient server.TestClient, expectedConte
 	if copyCommand, ok := testClient.NextCommand().(commands.Copy); !ok {
 		t.Fatal("expected COPY command")
 	} else {
-		resourceChannel, err := testClient.Resource(copyCommand.Source)
-		if err != nil {
-			t.Fatal("expected resource channel for COPY command, got error", err)
-		}
+		mustReadResources(t, testClient, copyCommand.Source, expectedContents...)
+	}
+}
 
-		idx := 0
-	out:
-		for {
-			select {
-			case item := <-resourceChannel:
-				switch titem := item.(type) {
-				case nil:
-					break out // break out on nil
-				case resources.ResolvedResource:
-					if titem.IsDir() {
-						// TODO-MULTI-STAGE-VMINIT: handle a directory here...
-						resourceData, err := mustReadFromReader(titem.Contents())
-						if err != nil {
-							t.Fatal("expected resource to read, got error", err)
-						}
-						fmt.Println(" ================> ", resourceData)
-						continue // skip directories for tests
-					}
-					resourceData, err := mustReadFromReader(titem.Contents())
-					if err != nil {
-						t.Fatal("expected resource to read, got error", err)
-					}
-					assert.Equal(t, expectedContents[idx], resourceData)
-					idx = idx + 1
-				case error:
-					t.Fatal("received an error while reading ADD resource", titem)
+func mustReadResources(t *testing.T, testClient server.TestClient, source string, expectedContents ...[]byte) {
+	resourceChannel, err := testClient.Resource(source)
+	if err != nil {
+		t.Fatal("expected resource channel for COPY command, got error", err)
+	}
+
+	idx := 0
+out:
+	for {
+		select {
+		case item := <-resourceChannel:
+			switch titem := item.(type) {
+			case nil:
+				break out // break out on nil
+			case resources.ResolvedResource:
+				resourceData, err := mustReadFromReader(titem.Contents())
+				if err != nil {
+					t.Fatal("expected resource to read, got error", err)
 				}
+				assert.Equal(t, expectedContents[idx], resourceData)
+				idx = idx + 1
+			case error:
+				t.Fatal("received an error while reading ADD resource", titem)
 			}
 		}
-
 	}
 }
 

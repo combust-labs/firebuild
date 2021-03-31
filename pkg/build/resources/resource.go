@@ -237,8 +237,6 @@ func NewResolvedFileResourceWithPath(contentsReader func() (io.ReadCloser, error
 // NewResolvedDirectoryResourceWithPath creates a resolved resource from input information containing resource source path.
 func NewResolvedDirectoryResourceWithPath(mode fs.FileMode, resolvedPath, sourcePath, targetPath string, workdir commands.Workdir, user commands.User) ResolvedResource {
 	return &defaultResolvedResource{contentsReader: func() (io.ReadCloser, error) {
-		// TODO-MULTI-STAGE-VMINIT: here an SCP like protocol is needed to read the contents of the directory in one go
-		fmt.Println(" =====================> directory ", resolvedPath)
 		return ioutil.NopCloser(bytes.NewReader([]byte{})), nil
 	},
 		isDir:         true,
