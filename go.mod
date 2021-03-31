@@ -10,6 +10,7 @@ require (
 	github.com/firecracker-microvm/firecracker-go-sdk v0.22.0
 	github.com/go-git/go-git/v5 v5.2.0
 	github.com/gofrs/uuid v4.0.0+incompatible
+	github.com/golang/protobuf v1.5.1
 	github.com/hashicorp/go-hclog v0.15.0
 	github.com/hashicorp/go-multierror v1.0.0
 	github.com/mitchellh/mapstructure v1.3.2

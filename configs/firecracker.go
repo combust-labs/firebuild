@@ -48,7 +48,7 @@ func NewFcConfigProvider(jailingFcConfig *JailingFirecrackerConfig, machineConfi
 
 func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 
-	var fifo io.WriteCloser // TODO: do it like firectl does it
+	var fifo io.WriteCloser // CONSIDER: do it like firectl does it
 
 	return firecracker.Config{
 		SocketPath:      "",      // given via Jailer

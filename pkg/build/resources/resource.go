@@ -191,16 +191,11 @@ func (dr *defaultResolver) resolveResources(originalSource, resourcePath, target
 			return nil, fmt.Errorf("resource failed: resolved '%s', reason: %v", match, statErr)
 		}
 		if statResult.IsDir() {
-			resources = append(resources, &defaultResolvedResource{contentsReader: func() (io.ReadCloser, error) {
-				return ioutil.NopCloser(bytes.NewReader([]byte{})), nil
-			},
-				isDir:         true,
-				resolved:      newPath,
-				sourcePath:    resourcePath,
-				targetMode:    statResult.Mode().Perm(),
-				targetPath:    targetPath,
-				targetWorkdir: targetWorkdir,
-				targetUser:    targetUser})
+			resources = append(resources,
+				NewResolvedDirectoryResourceWithPath(statResult.Mode().Perm(),
+					newPath, resourcePath, targetPath,
+					targetWorkdir,
+					targetUser))
 		} else {
 			resources = append(resources, &defaultResolvedResource{contentsReader: func() (io.ReadCloser, error) {
 				file, err := os.Open(newPath)
@@ -232,6 +227,20 @@ func NewResolvedFileResourceWithPath(contentsReader func() (io.ReadCloser, error
 	return &defaultResolvedResource{contentsReader: contentsReader,
 		isDir:         false,
 		resolved:      path,
+		targetMode:    mode,
+		sourcePath:    sourcePath,
+		targetPath:    targetPath,
+		targetWorkdir: workdir,
+		targetUser:    user}
+}
+
+// NewResolvedDirectoryResourceWithPath creates a resolved resource from input information containing resource source path.
+func NewResolvedDirectoryResourceWithPath(mode fs.FileMode, resolvedPath, sourcePath, targetPath string, workdir commands.Workdir, user commands.User) ResolvedResource {
+	return &defaultResolvedResource{contentsReader: func() (io.ReadCloser, error) {
+		return ioutil.NopCloser(bytes.NewReader([]byte{})), nil
+	},
+		isDir:         true,
+		resolved:      resolvedPath,
 		targetMode:    mode,
 		sourcePath:    sourcePath,
 		targetPath:    targetPath,

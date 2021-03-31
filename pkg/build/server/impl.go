@@ -14,8 +14,6 @@ import (
 	"github.com/hashicorp/go-hclog"
 )
 
-// TODO: handle closing of channels when the owning server is closed.
-
 // EventProvider provides the event subsriptions to the server executor.
 // When client event occurs, a corresponding event will be sent via one of the channels.
 type EventProvider interface {
@@ -84,9 +82,31 @@ func (impl *serverImpl) Commands(ctx context.Context, _ *proto.Empty) (*proto.Co
 }
 
 func (impl *serverImpl) Resource(req *proto.ResourceRequest, stream proto.RootfsServer_ResourceServer) error {
-	if resources, ok := impl.serverCtx.ResourcesResolved[req.Path]; ok {
-		// TODO: can this be parallel?
-		for _, resource := range resources {
+	if ress, ok := impl.serverCtx.ResourcesResolved[req.Path]; ok {
+		for _, resource := range ress {
+
+			reader, err := resource.Contents()
+			if err != nil {
+				return err
+			}
+
+			// make it a little bit smaller than the actual max size
+			safeBufSize := impl.serviceConfig.SafeClientMaxRecvMsgSize()
+
+			impl.logger.Debug("sending data with safe buffer size", "resource", resource.TargetPath(), "safe-buffer-size", safeBufSize)
+
+			if resource.IsDir() {
+				grpcDirResource := NewGRPCDirectoryResource(safeBufSize, resource)
+				outputChannel := grpcDirResource.WalkResource()
+				for {
+					payload := <-outputChannel
+					if payload == nil {
+						break
+					}
+					stream.Send(payload)
+				}
+				continue
+			}
 
 			resourceUUID := uuid.Must(uuid.NewV4()).String()
 			stream.Send(&proto.ResourceChunk{
@@ -103,18 +123,7 @@ func (impl *serverImpl) Resource(req *proto.ResourceRequest, stream proto.Rootfs
 				},
 			})
 
-			reader, err := resource.Contents()
-			if err != nil {
-				return err
-			}
-
-			// make it a little bit smaller than the actual max size
-			safeBufSize := impl.serviceConfig.SafeClientMaxRecvMsgSize()
-
-			impl.logger.Debug("sending data with safe buffer size", "resource", resource.TargetPath(), "safe-buffer-size", safeBufSize)
-
 			buffer := make([]byte, safeBufSize)
-
 			for {
 				readBytes, err := reader.Read(buffer)
 				if readBytes == 0 && err == io.EOF {
@@ -141,6 +150,7 @@ func (impl *serverImpl) Resource(req *proto.ResourceRequest, stream proto.Rootfs
 				}
 			}
 		}
+
 	} else {
 		return fmt.Errorf("not found: '%s/%s'", req.Stage, req.Path)
 	}

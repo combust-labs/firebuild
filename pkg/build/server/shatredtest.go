@@ -13,7 +13,6 @@ import (
 
 	"github.com/combust-labs/firebuild/grpc/proto"
 	"github.com/combust-labs/firebuild/pkg/build/commands"
-	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/hashicorp/go-hclog"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
@@ -21,9 +20,9 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-// TestingServerProvider wraps an instance of a server and provides testing
+// TestServer wraps an instance of a server and provides testing
 // utilities around it.
-type TestingServerProvider interface {
+type TestServer interface {
 	Start()
 	Stop()
 	FailedNotify() <-chan error
@@ -160,13 +159,37 @@ func (p *testGRPCServerProvider) Succeeded() bool {
 	return p.success
 }
 
+// MustStartTestGRPCServer starts a test server and returns a client, a server and a server cleanup function.
+// Fails test on any error.
+func MustStartTestGRPCServer(t *testing.T, logger hclog.Logger, buildCtx *WorkContext) (TestServer, TestClient, func()) {
+	grpcConfig := &GRPCServiceConfig{
+		ServerName:        "test-grpc-server",
+		BindHostPort:      "127.0.0.1:0",
+		EmbeddedCAKeySize: 1024, // use this low for tests only! low value speeds up tests
+	}
+	testServer := NewTestServer(t, logger.Named("grpc-server"), grpcConfig, buildCtx)
+	testServer.Start()
+	select {
+	case startErr := <-testServer.FailedNotify():
+		t.Fatal("expected the GRPC server to start but it failed", startErr)
+	case <-testServer.ReadyNotify():
+		t.Log("GRPC server started and serving on", grpcConfig.BindHostPort)
+	}
+	testClient, clientErr := NewTestClient(t, logger.Named("grpc-client"), grpcConfig)
+	if clientErr != nil {
+		testServer.Stop()
+		t.Fatal("expected the GRPC client, got error", clientErr)
+	}
+	return testServer, testClient, func() { testServer.Stop() }
+}
+
 // -- test client
 
 type TestClient interface {
 	Abort(error) error
 	Commands(*testing.T) error
 	NextCommand() commands.VMInitSerializableCommand
-	Resource(string) (<-chan resources.ResolvedResource, <-chan error, error)
+	Resource(string) (chan interface{}, error)
 	StdErr([]string) error
 	StdOut([]string) error
 	Success() error
@@ -241,20 +264,20 @@ func (c *testClient) NextCommand() commands.VMInitSerializableCommand {
 	return result
 }
 
-func (c *testClient) Resource(input string) (<-chan resources.ResolvedResource, <-chan error, error) {
+func (c *testClient) Resource(input string) (chan interface{}, error) {
 
-	chanResources := make(chan resources.ResolvedResource)
-	chanError := make(chan error)
+	chanResources := make(chan interface{})
 
 	resourceClient, err := c.underlying.Resource(context.Background(), &proto.ResourceRequest{Path: input})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	go func() {
 
 		var currentResource *testResolvedResource
 
+	out:
 		for {
 			response, err := resourceClient.Recv()
 
@@ -265,19 +288,18 @@ func (c *testClient) Resource(input string) (<-chan resources.ResolvedResource, 
 
 			// yes, err check after response check
 			if err != nil {
-				chanError <- errors.Wrap(err, "failed reading chunk")
-				return
+				chanResources <- errors.Wrap(err, "failed reading chunk")
+				break out
 			}
 
 			switch tresponse := response.GetPayload().(type) {
 			case *proto.ResourceChunk_Eof:
 				chanResources <- currentResource
 			case *proto.ResourceChunk_Chunk:
-				// TODO: check the checksum of the chunk...
 				hash := sha256.Sum256(tresponse.Chunk.Chunk)
-				if string(hash[:]) != string(currentResource.contents) {
-					chanError <- errors.Wrap(err, "chunk checksum did not match")
-					return
+				if string(hash[:]) != string(tresponse.Chunk.Checksum) {
+					chanResources <- errors.Wrap(err, "chunk checksum did not match")
+					break out
 				}
 				currentResource.contents = append(currentResource.contents, tresponse.Chunk.Chunk...)
 			case *proto.ResourceChunk_Header:
@@ -297,7 +319,7 @@ func (c *testClient) Resource(input string) (<-chan resources.ResolvedResource, 
 
 	}()
 
-	return chanResources, chanError, nil
+	return chanResources, nil
 }
 
 func (c *testClient) StdErr(input []string) error {
