@@ -7,7 +7,7 @@ import (
 
 	"github.com/combust-labs/firebuild-shared/build/commands"
 	"github.com/combust-labs/firebuild-shared/build/resources"
-	"github.com/combust-labs/firebuild-shared/build/server"
+	"github.com/combust-labs/firebuild-shared/build/rootfs"
 	"github.com/combust-labs/firebuild/pkg/build/env"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"
@@ -16,7 +16,7 @@ import (
 // Build represents the build operation.
 type Build interface {
 	AddInstructions(...interface{}) error
-	CreateContext(server.Resources) (*server.WorkContext, error)
+	CreateContext(rootfs.Resources) (*rootfs.WorkContext, error)
 	EntrypointInfo() *EntrypointInfo
 	ExposedPorts() []string
 	From() commands.From
@@ -56,11 +56,11 @@ type defaultBuild struct {
 	volumes []string
 }
 
-func (b *defaultBuild) CreateContext(dependencies server.Resources) (*server.WorkContext, error) {
+func (b *defaultBuild) CreateContext(dependencies rootfs.Resources) (*rootfs.WorkContext, error) {
 
-	ctx := &server.WorkContext{
+	ctx := &rootfs.WorkContext{
 		ExecutableCommands: []commands.VMInitSerializableCommand{},
-		ResourcesResolved:  make(server.Resources),
+		ResourcesResolved:  make(rootfs.Resources),
 	}
 
 	patternMatcher, matcherCreateErr := fileutils.NewPatternMatcher(b.excludes)

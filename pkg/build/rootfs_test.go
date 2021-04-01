@@ -11,7 +11,7 @@ import (
 
 	"github.com/combust-labs/firebuild-shared/build/commands"
 	"github.com/combust-labs/firebuild-shared/build/resources"
-	"github.com/combust-labs/firebuild-shared/build/server"
+	"github.com/combust-labs/firebuild-shared/build/rootfs"
 	"github.com/combust-labs/firebuild/pkg/build/reader"
 	"github.com/combust-labs/firebuild/pkg/build/stage"
 	"github.com/docker/docker/pkg/fileutils"
@@ -66,7 +66,7 @@ func TestContextBuilderMultiStageWithResources(t *testing.T) {
 	}
 
 	t.Run("it=fails if dependency resources do not exist", func(tt *testing.T) {
-		_, err := contextBuilder.WithResolver(resources.NewDefaultResolver()).CreateContext(make(server.Resources))
+		_, err := contextBuilder.WithResolver(resources.NewDefaultResolver()).CreateContext(make(rootfs.Resources))
 		if err == nil {
 			tt.Fatal("expected context creation to fail, but it built", err)
 		}
@@ -79,7 +79,7 @@ func TestContextBuilderMultiStageWithResources(t *testing.T) {
 		mustPutTestResource(tt, filepath.Join(tempDir, "etc/test/subdir/subdir-file1"), []byte("etc/test/subdir/subdir-file1"))
 
 		// construct resolved resources from the written files:
-		dependencyResources := server.Resources{
+		dependencyResources := rootfs.Resources{
 			"builder": []resources.ResolvedResource{resources.
 				NewResolvedDirectoryResourceWithPath(fs.ModePerm,
 					filepath.Join(tempDir, "etc/test"), "/etc/test", "/etc/test",
@@ -92,10 +92,10 @@ func TestContextBuilderMultiStageWithResources(t *testing.T) {
 			tt.Fatal("expected build context to be created, got error", err)
 		}
 
-		testServer, testClient, cancelFunc := server.MustStartTestGRPCServer(tt, logger, buildCtx)
+		testServer, testClient, cancelFunc := rootfs.MustStartTestGRPCServer(tt, logger, buildCtx)
 		defer cancelFunc()
 
-		opErr := testClient.Commands(tt)
+		opErr := testClient.Commands()
 		if opErr != nil {
 			tt.Fatal("GRPC client Commands() opErr", opErr)
 		}
@@ -152,15 +152,15 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 		t.Fatal("expected commands to be added, got error", err)
 	}
 
-	buildCtx, err := contextBuilder.WithResolver(resources.NewDefaultResolver()).CreateContext(make(server.Resources))
+	buildCtx, err := contextBuilder.WithResolver(resources.NewDefaultResolver()).CreateContext(make(rootfs.Resources))
 	if err != nil {
 		t.Fatal("expected build context to be created, got error", err)
 	}
 
-	testServer, testClient, cancelFunc := server.MustStartTestGRPCServer(t, logger, buildCtx)
+	testServer, testClient, cancelFunc := rootfs.MustStartTestGRPCServer(t, logger, buildCtx)
 	defer cancelFunc()
 
-	opErr := testClient.Commands(t)
+	opErr := testClient.Commands()
 	if opErr != nil {
 		t.Fatal("GRPC client Commands() opErr", opErr)
 	}
@@ -222,7 +222,7 @@ func mustReadFromReader(reader io.ReadCloser, _ error) ([]byte, error) {
 	return ioutil.ReadAll(reader)
 }
 
-func mustBeAddCommand(t *testing.T, testClient server.TestClient, expectedContents ...[]byte) {
+func mustBeAddCommand(t *testing.T, testClient rootfs.ClientProvider, expectedContents ...[]byte) {
 	if addCommand, ok := testClient.NextCommand().(commands.Add); !ok {
 		t.Fatal("expected ADD command")
 	} else {
@@ -231,7 +231,7 @@ func mustBeAddCommand(t *testing.T, testClient server.TestClient, expectedConten
 	}
 }
 
-func mustBeCopyCommand(t *testing.T, testClient server.TestClient, expectedContents ...[]byte) {
+func mustBeCopyCommand(t *testing.T, testClient rootfs.ClientProvider, expectedContents ...[]byte) {
 	if copyCommand, ok := testClient.NextCommand().(commands.Copy); !ok {
 		t.Fatal("expected COPY command")
 	} else {
@@ -239,7 +239,7 @@ func mustBeCopyCommand(t *testing.T, testClient server.TestClient, expectedConte
 	}
 }
 
-func mustReadResources(t *testing.T, testClient server.TestClient, source string, expectedContents ...[]byte) {
+func mustReadResources(t *testing.T, testClient rootfs.ClientProvider, source string, expectedContents ...[]byte) {
 	resourceChannel, err := testClient.Resource(source)
 	if err != nil {
 		t.Fatal("expected resource channel for COPY command, got error", err)
@@ -267,7 +267,7 @@ out:
 	}
 }
 
-func mustBeRunCommand(t *testing.T, testClient server.TestClient) {
+func mustBeRunCommand(t *testing.T, testClient rootfs.ClientProvider) {
 	if _, ok := testClient.NextCommand().(commands.Run); !ok {
 		t.Fatal("expected RUN command")
 	}
