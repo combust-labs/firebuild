@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/combust-labs/firebuild/pkg/build/commands"
-	"github.com/combust-labs/firebuild/pkg/build/resources"
+	"github.com/combust-labs/firebuild-shared/build/commands"
+	"github.com/combust-labs/firebuild-shared/build/resources"
 	"github.com/combust-labs/firebuild/pkg/build/stage"
 	"github.com/combust-labs/firebuild/pkg/containers"
 	"github.com/combust-labs/firebuild/pkg/utils"

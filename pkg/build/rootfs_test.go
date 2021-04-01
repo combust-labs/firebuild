@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/combust-labs/firebuild/pkg/build/commands"
+	"github.com/combust-labs/firebuild-shared/build/commands"
+	"github.com/combust-labs/firebuild-shared/build/resources"
+	"github.com/combust-labs/firebuild-shared/build/server"
 	"github.com/combust-labs/firebuild/pkg/build/reader"
-	"github.com/combust-labs/firebuild/pkg/build/resources"
-	"github.com/combust-labs/firebuild/pkg/build/server"
 	"github.com/combust-labs/firebuild/pkg/build/stage"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"

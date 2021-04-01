@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/combust-labs/firebuild-mmds/mmds"
+	"github.com/combust-labs/firebuild-shared/build/commands"
+	"github.com/combust-labs/firebuild-shared/build/resources"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/build"
-	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/reader"
-	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/combust-labs/firebuild/pkg/build/stage"
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"

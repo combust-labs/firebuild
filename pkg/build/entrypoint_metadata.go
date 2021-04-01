@@ -1,6 +1,6 @@
 package build
 
-import "github.com/combust-labs/firebuild/pkg/build/commands"
+import "github.com/combust-labs/firebuild-shared/build/commands"
 
 // EntrypointInfo contains the Docker entrypoint and commands.
 // Returned by the rootfs builder after parsing the Docker source.

@@ -1,7 +1,7 @@
 package stage
 
 import (
-	"github.com/combust-labs/firebuild/pkg/build/commands"
+	"github.com/combust-labs/firebuild-shared/build/commands"
 	bcErrors "github.com/combust-labs/firebuild/pkg/build/errors"
 )
 
