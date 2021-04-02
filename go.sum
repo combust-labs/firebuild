@@ -202,8 +202,8 @@ github.com/combust-labs/firebuild-embedded-ca v0.0.2 h1:0eSWNiO8qw2RLwHbvkk7jvTj
 github.com/combust-labs/firebuild-embedded-ca v0.0.2/go.mod h1:aX6H7DxiBXhYwBHxe2IVlJf2vwMz9SaQtK9O/3VAHdU=
 github.com/combust-labs/firebuild-mmds v0.0.3 h1:/OFryxpT76sUxHJBw0ccdtKN3dMUp4dvT+ayBeSuYzQ=
 github.com/combust-labs/firebuild-mmds v0.0.3/go.mod h1:2Fvj2vc7AqWOVPjq9TkUKTn0qwyv7hW5cG2bTVPs9ws=
-github.com/combust-labs/firebuild-shared v0.0.3 h1:BiVSiy7fErQmYh+Jnav1zQaRp3FgztW+Eca2OF6nJXc=
-github.com/combust-labs/firebuild-shared v0.0.3/go.mod h1:NcM03wlGqNOK1ciSSM46Xv6mE6rsjl3FZUs9jGA6wW0=
+github.com/combust-labs/firebuild-shared v0.0.4 h1:XPIlAgae2e81wFGSlo6LSegISvUWDvEvCfPtnTGCzVw=
+github.com/combust-labs/firebuild-shared v0.0.4/go.mod h1:NcM03wlGqNOK1ciSSM46Xv6mE6rsjl3FZUs9jGA6wW0=
 github.com/containerd/cgroups v0.0.0-20190919134610-bf292b21730f/go.mod h1:OApqhQ4XNSNC13gXIwDjhOQxjWa/NxkwZXJ1EvqT0ko=
 github.com/containerd/cgroups v0.0.0-20200531161412-0dbf7f05ba59/go.mod h1:pA0z1pT8KYB3TCXK/ocprsh7MAkoW8bZVzPdih9snmM=
 github.com/containerd/cgroups v0.0.0-20200710171044-318312a37340 h1:9atoWyI9RtXFwf7UDbme/6M8Ud0rFrx+Q3ZWgSnsxtw=
