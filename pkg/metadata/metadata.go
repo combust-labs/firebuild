@@ -117,6 +117,7 @@ type MDRunCNI struct {
 
 // MDRun contains the runtime information about a VMM.
 type MDRun struct {
+	Bootstrap         *mmds.MMDSBootstrap  `json:"bootstrap,omitempty" mapstructure:"bootstrap,omitempty"`
 	CNI               MDRunCNI             `json:"cni" mapstructure:"cni"`
 	Configs           MDRunConfigs         `json:"configs" mapstructure:"configs"`
 	Drives            []models.Drive       `json:"drivers" mapstructure:"drives"`
@@ -149,7 +150,8 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 	metadata := &mmds.MMDSLatest{
 		Latest: &mmds.MMDSLatestMetadata{
 			Metadata: &mmds.MMDSData{
-				VMMID: r.VMMID,
+				Bootstrap: r.Bootstrap,
+				VMMID:     r.VMMID,
 				Drives: func() map[string]*mmds.MMDSDrive {
 					result := map[string]*mmds.MMDSDrive{}
 					for _, drive := range r.Drives {

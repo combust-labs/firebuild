@@ -336,7 +336,7 @@ func processCommand() int {
 
 	metadataErr := startedMachine.DecorateMetadata(runMetadata)
 	if metadataErr != nil {
-		startedMachine.Stop(vmmCtx, nil)
+		startedMachine.Stop(vmmCtx)
 		vmmLogger.Error("Failed fetching machine metadata", "reason", metadataErr)
 		return 1
 	}
@@ -390,7 +390,7 @@ func installSignalHandlers(ctx context.Context, logger hclog.Logger, m vmm.Start
 			switch s := <-c; {
 			case s == syscall.SIGTERM || s == os.Interrupt:
 				logger.Info("Caught SIGINT, requesting clean shutdown")
-				chanStopped <- m.Stop(ctx, nil)
+				chanStopped <- m.Stop(ctx)
 			}
 		}
 	}()
