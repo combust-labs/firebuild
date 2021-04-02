@@ -8,7 +8,7 @@ import (
 	"github.com/combust-labs/firebuild-shared/build/commands"
 	"github.com/combust-labs/firebuild-shared/build/resources"
 	"github.com/combust-labs/firebuild-shared/build/rootfs"
-	"github.com/combust-labs/firebuild/pkg/build/env"
+	"github.com/combust-labs/firebuild-shared/env"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"
 )
