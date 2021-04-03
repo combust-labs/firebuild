@@ -182,19 +182,18 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 						result := map[string]*mmds.MMDSNetworkInterface{}
 						for _, nic := range r.NetworkInterfaces {
 							result[nic.StaticConfiguration.MacAddress] = &mmds.MMDSNetworkInterface{
-								HostDevName: nic.StaticConfiguration.HostDevName,
-								Gateway:     nic.StaticConfiguration.IPConfiguration.Gateway,
-								IfName:      nic.StaticConfiguration.IPConfiguration.IfName,
-								IP:          nic.StaticConfiguration.IPConfiguration.IP,
-								IPAddr:      nic.StaticConfiguration.IPConfiguration.IPAddr,
-								IPMask:      nic.StaticConfiguration.IPConfiguration.IPMask,
-								IPNet:       nic.StaticConfiguration.IPConfiguration.IPNet,
-								Nameservers: strings.Join(nic.StaticConfiguration.IPConfiguration.Nameservers, ","),
+								HostDeviceName: nic.StaticConfiguration.HostDevName,
+								Gateway:        nic.StaticConfiguration.IPConfiguration.Gateway,
+								IfName:         nic.StaticConfiguration.IPConfiguration.IfName,
+								IP:             nic.StaticConfiguration.IPConfiguration.IP,
+								IPAddr:         nic.StaticConfiguration.IPConfiguration.IPAddr,
+								IPMask:         nic.StaticConfiguration.IPConfiguration.IPMask,
+								IPNet:          nic.StaticConfiguration.IPConfiguration.IPNet,
+								Nameservers:    strings.Join(nic.StaticConfiguration.IPConfiguration.Nameservers, ","),
 							}
 						}
 						return result
 					}(),
-					SSHPort: fmt.Sprintf("%d", r.Configs.Machine.SSHPort),
 				},
 				ImageTag: r.Rootfs.Tag,
 				Users: func() map[string]*mmds.MMDSUser {

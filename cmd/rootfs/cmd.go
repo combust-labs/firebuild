@@ -516,24 +516,56 @@ func processCommand() int {
 	// Waiting for bootstrap to complete
 	// --
 
+	chanAborted := make(chan error, 1)
+	chanSucceeded := make(chan struct{}, 1)
+
+	select {
+	case <-time.After(time.Second * 30): // TODO: make this timeout configurable
+		startedMachine.StopAndWait(vmmCtx)
+		return 1
+	case firstMessage := <-rootfsServer.OnMessage():
+		// first message must be the commands fetched control message:
+		switch firstMessage.(type) {
+		case *rootfs.ControlMsgCommandsRequested:
+		default:
+			// invalid communication from the client:
+			vmmLogger.Error("invalid communication from the client, expected *rootfs.ControlMsgCommandsRequested", "received", fmt.Sprintf("%_T", firstMessage))
+			startedMachine.StopAndWait(vmmCtx)
+			return 1
+		}
+	}
+
 	go func() {
 		for {
-			select {
-			case stdoutLine := <-rootfsServer.OnStdout():
-				vmmLogger.Info("VMM stdout said", "line", stdoutLine)
-			case stderrLine := <-rootfsServer.OnStderr():
-				vmmLogger.Error("VMM stdout said", "line", stderrLine)
+			nextMessage := <-rootfsServer.OnMessage()
+			switch tNextMessage := nextMessage.(type) {
+			case *rootfs.ClientMsgAborted:
+				chanAborted <- tNextMessage.Error
+				return
+			case *rootfs.ClientMsgSuccess:
+				close(chanSucceeded)
+				return
+			case *rootfs.ClientMsgStderr:
+				for _, line := range tNextMessage.Lines {
+					fmt.Fprintln(os.Stderr, strings.TrimSpace(line))
+				}
+			case *rootfs.ClientMsgStdout:
+				for _, line := range tNextMessage.Lines {
+					fmt.Fprintln(os.Stdout, strings.TrimSpace(line))
+				}
+			case *rootfs.ControlMsgPingSent:
+				rootLogger.Debug("received ping from bootstrap client")
 			}
 		}
 	}()
 
 	select {
-	case abortErr := <-rootfsServer.OnAbort():
-		vmmLogger.Error("bootstrap aborted by VMM", "reason", abortErr)
+	case abortError := <-chanAborted:
+		vmmLogger.Error("VM aborted bootstrap with error", "reason", abortError)
 		startedMachine.StopAndWait(vmmCtx)
 		return 1
-	case <-rootfsServer.OnSuccess():
-		vmmLogger.Info(" ==================> !!!!!!!!!!!!!!!!!!!!!!!!!!! bootstrap finished successfully by VMM")
+	case <-chanSucceeded:
+		vmmLogger.Info("VM finished bootstrap successfully")
 	}
 
 	// --
