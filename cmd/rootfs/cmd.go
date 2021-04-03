@@ -525,6 +525,8 @@ func processCommand() int {
 
 	spanVMMStart.Finish()
 
+	spanBootstrapping := tracer.StartSpan("rootfs-boostrapping", opentracing.FollowsFrom(spanRootfsServerStart.Context()))
+
 	ipAddress := runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP
 	gateway := runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.Gateway
 
@@ -541,6 +543,9 @@ func processCommand() int {
 
 	select {
 	case <-time.After(time.Second * 30): // TODO: make this timeout configurable
+		spanBootstrapping.SetBaggageItem("error", "VM did not communicate within timeout, bootstrap aborted")
+		spanBootstrapping.Finish()
+		vmmLogger.Error("VM did not communicate within timeout, aborting bootstrap")
 		startedMachine.StopAndWait(vmmCtx)
 		return 1
 	case firstMessage := <-rootfsServer.OnMessage():
@@ -549,6 +554,8 @@ func processCommand() int {
 		case *rootfs.ControlMsgCommandsRequested:
 		default:
 			// invalid communication from the client:
+			spanBootstrapping.SetBaggageItem("error", "VM not initiated communication with commands request")
+			spanBootstrapping.Finish()
 			vmmLogger.Error("invalid communication from the client, expected *rootfs.ControlMsgCommandsRequested", "received", fmt.Sprintf("%_T", firstMessage))
 			startedMachine.StopAndWait(vmmCtx)
 			return 1
@@ -581,6 +588,8 @@ func processCommand() int {
 
 	select {
 	case abortError := <-chanAborted:
+		spanBootstrapping.SetBaggageItem("error", abortError.Error())
+		spanBootstrapping.Finish()
 		vmmLogger.Error("VM aborted bootstrap with error", "reason", abortError)
 		startedMachine.StopAndWait(vmmCtx)
 		return 1
@@ -588,13 +597,13 @@ func processCommand() int {
 		vmmLogger.Info("VM finished bootstrap successfully")
 	}
 
+	spanBootstrapping.Finish()
+
 	// --
 	// END / Waiting for bootstrap to complete
 	// --
 
-	// TODO: fix the mess with traces
-
-	spanStop := tracer.StartSpan("rootfs-vmm-stop", opentracing.ChildOf(spanVMMStart.Context()))
+	spanStop := tracer.StartSpan("rootfs-vmm-stop", opentracing.FollowsFrom(spanBootstrapping.Context()))
 
 	startedMachine.StopAndWait(vmmCtx)
 
