@@ -367,7 +367,9 @@ func processCommand() int {
 		return 1
 	}
 
-	// TODO: trace embdedded CA
+	spanWorkContext.Finish()
+
+	spanEmbeddedCA := tracer.StartSpan("embedded-ca-setup", opentracing.ChildOf(spanWorkContext.Context()))
 
 	embeddedCAConfig := &ca.EmbeddedCAConfig{
 		Addresses:     []string{jailingFcConfig.VMMID()},
@@ -378,22 +380,32 @@ func processCommand() int {
 	embeddedCA, caSetupErr := ca.NewDefaultEmbeddedCAWithLogger(embeddedCAConfig, rootLogger.Named("embedded-ca"))
 	if caSetupErr != nil {
 		rootLogger.Error("failed setting up VM build embedded CA", "reason", caSetupErr)
+		spanEmbeddedCA.SetBaggageItem("error", caSetupErr.Error())
+		spanEmbeddedCA.Finish()
 		return 1
 	}
 
-	// TODO: trace server TLS config create
+	spanEmbeddedCA.Finish()
+
+	spanServerTLSConfig := tracer.StartSpan("embedded-ca-server-tls", opentracing.ChildOf(spanEmbeddedCA.Context()))
 
 	serverTLSConfig, serverTLSConfigErr := embeddedCA.NewServerCertTLSConfig()
 	if serverTLSConfigErr != nil {
 		rootLogger.Error("failed creating bootstrap server TLS config", "reason", serverTLSConfigErr)
+		spanServerTLSConfig.SetBaggageItem("error", serverTLSConfigErr.Error())
+		spanServerTLSConfig.Finish()
 		return 1
 	}
 
-	// TODO: trace server build server start
+	spanServerTLSConfig.Finish()
+
+	spanRootfsServerStart := tracer.StartSpan("rootfs-server-start", opentracing.ChildOf(spanServerTLSConfig.Context()))
 
 	ifaceIP, ifaceIPErr := utils.GetInterfaceV4Addr("eno1") // TODO: extract the interface as a setting
 	if ifaceIPErr != nil {
 		rootLogger.Error("failed fetching IP address of the configured interface", "reason", ifaceIPErr)
+		spanRootfsServerStart.SetBaggageItem("error", ifaceIPErr.Error())
+		spanRootfsServerStart.Finish()
 		return 1
 	}
 
@@ -408,23 +420,31 @@ func processCommand() int {
 	select {
 	case startErr := <-rootfsServer.FailedNotify():
 		rootLogger.Error("build server did not start", "reason", startErr)
-		spanWorkContext.SetBaggageItem("error", startErr.Error())
-		spanWorkContext.Finish()
+		spanRootfsServerStart.SetBaggageItem("error", startErr.Error())
+		spanRootfsServerStart.Finish()
 		return 1
 	case <-rootfsServer.ReadyNotify():
-		defer rootfsServer.Stop()
+		cleanup.Add(func() {
+			rootfsServer.Stop()
+		})
 		rootLogger.Info("Build server started and serving on", rootfsServerConfig.BindHostPort)
 	}
 
-	// TODO: trace client TLS certificate create
+	spanRootfsServerStart.Finish()
+
+	spanClientTLSConfig := tracer.StartSpan("embedded-ca-client-tls", opentracing.ChildOf(spanRootfsServerStart.Context()))
 
 	clientCertData, clientCertErr := embeddedCA.NewClientCert()
 	if clientCertErr != nil {
 		rootLogger.Error("failed creating client certificate for MMDS bootstrap", "reason", clientCertErr)
-		spanWorkContext.SetBaggageItem("error", clientCertErr.Error())
-		spanWorkContext.Finish()
+		spanClientTLSConfig.SetBaggageItem("error", clientCertErr.Error())
+		spanClientTLSConfig.Finish()
 		return 1
 	}
+
+	spanClientTLSConfig.Finish()
+
+	spanRootfsBuildMetadata := tracer.StartSpan("rootfs-build-metadata", opentracing.ChildOf(spanClientTLSConfig.Context()))
 
 	runMetadata.Configs.Machine = machineConfig
 	runMetadata.Configs.CNI = cniConfig
@@ -445,8 +465,6 @@ func processCommand() int {
 	runMetadata.Rootfs = &metadata.MDRootfs{
 		EntrypointInfo: &mmds.MMDSRootfsEntrypointInfo{},
 	}
-
-	spanWorkContext.Finish()
 
 	// --
 	// Ready to start the VM and bootstrap:
@@ -480,7 +498,9 @@ func processCommand() int {
 				NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 		})
 
-	spanVMMCreate := tracer.StartSpan("rootfs-vmm-create", opentracing.ChildOf(spanWorkContext.Context()))
+	spanRootfsBuildMetadata.Finish()
+
+	spanVMMCreate := tracer.StartSpan("rootfs-vmm-create", opentracing.ChildOf(spanRootfsBuildMetadata.Context()))
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
 		WithHandlersAdapter(strategy).
