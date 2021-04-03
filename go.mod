@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/combust-labs/firebuild-embedded-ca v0.0.2
 	github.com/combust-labs/firebuild-mmds v0.0.8
-	github.com/combust-labs/firebuild-shared v0.0.5
+	github.com/combust-labs/firebuild-shared v0.0.7
 	github.com/containernetworking/cni v0.8.0
 	github.com/docker/docker v20.10.4+incompatible
 	github.com/firecracker-microvm/firecracker-go-sdk v0.22.0
