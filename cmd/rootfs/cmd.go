@@ -50,7 +50,6 @@ var (
 	profilesConfig  = configs.NewProfileCommandConfig()
 	runCache        = configs.NewRunCacheConfig()
 	tracingConfig   = configs.NewTracingConfig("firebuild-rootfs")
-	rsaKeySize      = 4096
 
 	storageResolver = resolver.NewDefaultResolver()
 )
@@ -373,8 +372,8 @@ func processCommand() int {
 
 	embeddedCAConfig := &ca.EmbeddedCAConfig{
 		Addresses:     []string{jailingFcConfig.VMMID()},
-		CertsValidFor: time.Hour, // TODO: make a setting out of it
-		KeySize:       2048,      // TODO: make a setting out of it
+		CertsValidFor: commandConfig.BootstrapCertsValidity,
+		KeySize:       commandConfig.BootstrapCertsKeySize,
 	}
 
 	embeddedCA, caSetupErr := ca.NewDefaultEmbeddedCAWithLogger(embeddedCAConfig, rootLogger.Named("embedded-ca"))
@@ -401,7 +400,7 @@ func processCommand() int {
 
 	spanRootfsServerStart := tracer.StartSpan("rootfs-server-start", opentracing.ChildOf(spanServerTLSConfig.Context()))
 
-	ifaceIP, ifaceIPErr := utils.GetInterfaceV4Addr("eno1") // TODO: extract the interface as a setting
+	ifaceIP, ifaceIPErr := utils.GetInterfaceV4Addr(commandConfig.BootstrapServerBindInterface)
 	if ifaceIPErr != nil {
 		rootLogger.Error("failed fetching IP address of the configured interface", "reason", ifaceIPErr)
 		spanRootfsServerStart.SetBaggageItem("error", ifaceIPErr.Error())
@@ -542,7 +541,7 @@ func processCommand() int {
 	chanSucceeded := make(chan struct{}, 1)
 
 	select {
-	case <-time.After(time.Second * 30): // TODO: make this timeout configurable
+	case <-time.After(commandConfig.BootstrapInitialCommunicationTimeout):
 		spanBootstrapping.SetBaggageItem("error", "VM did not communicate within timeout, bootstrap aborted")
 		spanBootstrapping.Finish()
 		vmmLogger.Error("VM did not communicate within timeout, aborting bootstrap")

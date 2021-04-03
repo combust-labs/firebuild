@@ -107,6 +107,11 @@ type RootfsCommandConfig struct {
 	PostBuildCommands []string
 	PreBuildCommands  []string
 	Tag               string
+
+	BootstrapCertsKeySize                int
+	BootstrapCertsValidity               time.Duration
+	BootstrapInitialCommunicationTimeout time.Duration
+	BootstrapServerBindInterface         string
 }
 
 // NewRootfsCommandConfig returns new command configuration.
@@ -123,6 +128,11 @@ func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringArrayVar(&c.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
 		c.flagSet.StringArrayVar(&c.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
 		c.flagSet.StringVar(&c.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
+
+		c.flagSet.IntVar(&c.BootstrapCertsKeySize, "bootstrap-certs-key-size", 2048, "Embedded CA bootstrap certificates key size, recommended values: 2048 or 4096")
+		c.flagSet.DurationVar(&c.BootstrapCertsValidity, "bootstrap-certs-validity", time.Minute*5, "The period for which the embedded bootstrap certificates are valid for")
+		c.flagSet.DurationVar(&c.BootstrapInitialCommunicationTimeout, "bootstrap-initial-communication-timeout", time.Second*30, "Howlong to wait for vminit to initiate bootstrap with commands request before considering bootstrap failed")
+		c.flagSet.StringVar(&c.BootstrapServerBindInterface, "bootstrap-server-bind-interface", "eno1", "The interface to bind the bootstrap server on")
 	}
 	return c.flagSet
 }
