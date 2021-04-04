@@ -16,7 +16,7 @@ type TracingConfig struct {
 	LogEnable       bool
 }
 
-// NewCNIConfig returns a new instance of the configuration.
+// NewTracingConfig returns a new instance of the configuration.
 func NewTracingConfig(appName string) *TracingConfig {
 	return &TracingConfig{
 		ApplicationName: appName,

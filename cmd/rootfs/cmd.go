@@ -3,22 +3,23 @@ package rootfs
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/combust-labs/firebuild-embedded-ca/ca"
 	"github.com/combust-labs/firebuild-mmds/mmds"
+	"github.com/combust-labs/firebuild-shared/build/commands"
+	"github.com/combust-labs/firebuild-shared/build/resources"
+	"github.com/combust-labs/firebuild-shared/build/rootfs"
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/build"
-	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/build/reader"
-	"github.com/combust-labs/firebuild/pkg/build/resources"
 	"github.com/combust-labs/firebuild/pkg/build/stage"
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/profiles"
-	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/combust-labs/firebuild/pkg/storage"
 	"github.com/combust-labs/firebuild/pkg/storage/resolver"
 	"github.com/combust-labs/firebuild/pkg/tracing"
@@ -30,7 +31,6 @@ import (
 	"github.com/combust-labs/firebuild/pkg/vmm"
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/ssh"
 )
 
 // Command is the build command declaration.
@@ -42,16 +42,14 @@ var Command = &cobra.Command{
 }
 
 var (
-	cniConfig        = configs.NewCNIConfig()
-	commandConfig    = configs.NewRootfsCommandConfig()
-	egressTestConfig = configs.NewEgressTestConfig()
-	jailingFcConfig  = configs.NewJailingFirecrackerConfig()
-	logConfig        = configs.NewLogginConfig()
-	machineConfig    = configs.NewMachineConfig()
-	profilesConfig   = configs.NewProfileCommandConfig()
-	runCache         = configs.NewRunCacheConfig()
-	tracingConfig    = configs.NewTracingConfig("firebuild-rootfs")
-	rsaKeySize       = 4096
+	cniConfig       = configs.NewCNIConfig()
+	commandConfig   = configs.NewRootfsCommandConfig()
+	jailingFcConfig = configs.NewJailingFirecrackerConfig()
+	logConfig       = configs.NewLogginConfig()
+	machineConfig   = configs.NewMachineConfig()
+	profilesConfig  = configs.NewProfileCommandConfig()
+	runCache        = configs.NewRunCacheConfig()
+	tracingConfig   = configs.NewTracingConfig("firebuild-rootfs")
 
 	storageResolver = resolver.NewDefaultResolver()
 )
@@ -59,7 +57,6 @@ var (
 func initFlags() {
 	Command.Flags().AddFlagSet(cniConfig.FlagSet())
 	Command.Flags().AddFlagSet(commandConfig.FlagSet())
-	Command.Flags().AddFlagSet(egressTestConfig.FlagSet())
 	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
@@ -79,8 +76,6 @@ func run(cobraCommand *cobra.Command, _ []string) {
 }
 
 func processCommand() int {
-
-	machineConfig.NoMMDS = true // TODO: find a better method
 
 	cleanup := utils.NewDefers()
 	defer cleanup.CallAll()
@@ -173,28 +168,9 @@ func processCommand() int {
 
 	spanTempDir.Finish()
 
-	spanGenerateKeys := tracer.StartSpan("rootfs-generate-keys", opentracing.ChildOf(spanTempDir.Context()))
-
-	rsaPrivateKey, rsaPrivateKeyErr := utils.GenerateRSAPrivateKey(rsaKeySize)
-	if rsaPrivateKeyErr != nil {
-		rootLogger.Error("failed generating private key for the VMM build", "reason", rsaPrivateKeyErr)
-		spanGenerateKeys.SetBaggageItem("error", rsaPrivateKeyErr.Error())
-		spanGenerateKeys.Finish()
-		return 1
-	}
-	sshPublicKey, sshPublicKeyErr := utils.GetSSHKey(rsaPrivateKey)
-	if sshPublicKeyErr != nil {
-		rootLogger.Error("failed generating public SSH key from the private RSA key", "reason", sshPublicKeyErr)
-		spanGenerateKeys.SetBaggageItem("error", sshPublicKeyErr.Error())
-		spanGenerateKeys.Finish()
-		return 1
-	}
-
-	spanGenerateKeys.Finish()
-
 	// -- Command specific:
 
-	spanParseDockerfile := tracer.StartSpan("rootfs-parse-dockerfile", opentracing.ChildOf(spanGenerateKeys.Context()))
+	spanParseDockerfile := tracer.StartSpan("rootfs-parse-dockerfile", opentracing.ChildOf(spanTempDir.Context()))
 
 	readResults, err := reader.ReadFromString(commandConfig.Dockerfile, cacheDirectory)
 	if err != nil {
@@ -243,15 +219,15 @@ func processCommand() int {
 	spanBuildContext := tracer.StartSpan("rootfs-build-context", opentracing.ChildOf(spanReadStages.Context()))
 
 	// The first thing to do is to resolve the Dockerfile:
-	buildContext := build.NewDefaultBuild()
-	if err := buildContext.AddInstructions(stageToBuild.Commands()...); err != nil {
+	contextBuilder := build.NewDefaultBuild()
+	if err := contextBuilder.AddInstructions(stageToBuild.Commands()...); err != nil {
 		rootLogger.Error("commands could not be processed", "reason", err)
 		spanBuildContext.SetBaggageItem("error", err.Error())
 		spanBuildContext.Finish()
 		return 1
 	}
 
-	structuredFrom := buildContext.From().ToStructuredFrom()
+	structuredFrom := contextBuilder.From().ToStructuredFrom()
 
 	// which resources from dependencies do we need:
 	requiredCopies := []commands.Copy{}
@@ -357,6 +333,142 @@ func processCommand() int {
 		WithKernelOverride(resolvedKernel.HostPath()).
 		WithRootfsOverride(buildRootfs)
 
+	// gather the running vmm metadata:
+	runMetadata := &metadata.MDRun{
+		Type: metadata.MetadataTypeRun,
+	}
+
+	// --
+	// Prepare build context and start the build time server:
+	// --
+
+	postBuildCommands := []commands.Run{}
+	for _, cmd := range commandConfig.PostBuildCommands {
+		postBuildCommands = append(postBuildCommands, commands.RunWithDefaults(cmd))
+	}
+	preBuildCommands := []commands.Run{}
+	for _, cmd := range commandConfig.PreBuildCommands {
+		preBuildCommands = append(preBuildCommands, commands.RunWithDefaults(cmd))
+	}
+
+	spanWorkContext := tracer.StartSpan("rootfs-build-exec", opentracing.ChildOf(spanRootfsCopy.Context()))
+
+	executionCtx, buildErr := contextBuilder.
+		WithLogger(rootLogger.Named("builder")).
+		WithPostBuildCommands(postBuildCommands...).
+		WithPreBuildCommands(preBuildCommands...).
+		CreateContext(dependencyResources)
+
+	if buildErr != nil {
+		rootLogger.Error("failed creating bootstrap work context", "reason", buildErr)
+		spanWorkContext.SetBaggageItem("error", buildErr.Error())
+		spanWorkContext.Finish()
+		return 1
+	}
+
+	spanWorkContext.Finish()
+
+	spanEmbeddedCA := tracer.StartSpan("embedded-ca-setup", opentracing.ChildOf(spanWorkContext.Context()))
+
+	embeddedCAConfig := &ca.EmbeddedCAConfig{
+		Addresses:     []string{jailingFcConfig.VMMID()},
+		CertsValidFor: commandConfig.BootstrapCertsValidity,
+		KeySize:       commandConfig.BootstrapCertsKeySize,
+	}
+
+	embeddedCA, caSetupErr := ca.NewDefaultEmbeddedCAWithLogger(embeddedCAConfig, rootLogger.Named("embedded-ca"))
+	if caSetupErr != nil {
+		rootLogger.Error("failed setting up VM build embedded CA", "reason", caSetupErr)
+		spanEmbeddedCA.SetBaggageItem("error", caSetupErr.Error())
+		spanEmbeddedCA.Finish()
+		return 1
+	}
+
+	spanEmbeddedCA.Finish()
+
+	spanServerTLSConfig := tracer.StartSpan("embedded-ca-server-tls", opentracing.ChildOf(spanEmbeddedCA.Context()))
+
+	serverTLSConfig, serverTLSConfigErr := embeddedCA.NewServerCertTLSConfig()
+	if serverTLSConfigErr != nil {
+		rootLogger.Error("failed creating bootstrap server TLS config", "reason", serverTLSConfigErr)
+		spanServerTLSConfig.SetBaggageItem("error", serverTLSConfigErr.Error())
+		spanServerTLSConfig.Finish()
+		return 1
+	}
+
+	spanServerTLSConfig.Finish()
+
+	spanRootfsServerStart := tracer.StartSpan("rootfs-server-start", opentracing.ChildOf(spanServerTLSConfig.Context()))
+
+	ifaceIP, ifaceIPErr := utils.GetInterfaceV4Addr(commandConfig.BootstrapServerBindInterface)
+	if ifaceIPErr != nil {
+		rootLogger.Error("failed fetching IP address of the configured interface", "reason", ifaceIPErr)
+		spanRootfsServerStart.SetBaggageItem("error", ifaceIPErr.Error())
+		spanRootfsServerStart.Finish()
+		return 1
+	}
+
+	rootfsServerConfig := &rootfs.GRPCServiceConfig{
+		BindHostPort:    fmt.Sprintf("%s:0", ifaceIP),
+		TLSConfigServer: serverTLSConfig,
+	}
+
+	rootfsServer := rootfs.New(rootfsServerConfig, rootLogger.Named("build-server"))
+	rootfsServer.Start(executionCtx)
+
+	select {
+	case startErr := <-rootfsServer.FailedNotify():
+		rootLogger.Error("build server did not start", "reason", startErr)
+		spanRootfsServerStart.SetBaggageItem("error", startErr.Error())
+		spanRootfsServerStart.Finish()
+		return 1
+	case <-rootfsServer.ReadyNotify():
+		cleanup.Add(func() {
+			rootfsServer.Stop()
+		})
+		rootLogger.Info("Build server started and serving on", rootfsServerConfig.BindHostPort)
+	}
+
+	spanRootfsServerStart.Finish()
+
+	spanClientTLSConfig := tracer.StartSpan("embedded-ca-client-tls", opentracing.ChildOf(spanRootfsServerStart.Context()))
+
+	clientCertData, clientCertErr := embeddedCA.NewClientCert()
+	if clientCertErr != nil {
+		rootLogger.Error("failed creating client certificate for MMDS bootstrap", "reason", clientCertErr)
+		spanClientTLSConfig.SetBaggageItem("error", clientCertErr.Error())
+		spanClientTLSConfig.Finish()
+		return 1
+	}
+
+	spanClientTLSConfig.Finish()
+
+	spanRootfsBuildMetadata := tracer.StartSpan("rootfs-build-metadata", opentracing.ChildOf(spanClientTLSConfig.Context()))
+
+	runMetadata.Configs.Machine = machineConfig
+	runMetadata.Configs.CNI = cniConfig
+	runMetadata.Bootstrap = &mmds.MMDSBootstrap{
+		HostPort:    rootfsServerConfig.BindHostPort,
+		CaChain:     strings.Join(embeddedCA.CAPEMChain(), "\n"),
+		Certificate: string(clientCertData.CertificatePEM()),
+		Key:         string(clientCertData.KeyPEM()),
+		ServerName:  jailingFcConfig.VMMID(),
+	}
+	// provide safe defaults:
+	runMetadata.Configs.RunConfig = &configs.RunCommandConfig{
+		EnvFiles:      []string{},
+		EnvVars:       map[string]string{},
+		IdentityFiles: []string{},
+		Hostname:      "",
+	}
+	runMetadata.Rootfs = &metadata.MDRootfs{
+		EntrypointInfo: &mmds.MMDSRootfsEntrypointInfo{},
+	}
+
+	// --
+	// Ready to start the VM and bootstrap:
+	// --
+
 	vethIfaceName := naming.GetRandomVethName()
 
 	vmmLogger := rootLogger.With("vmm-id", jailingFcConfig.VMMID(), "veth-name", vethIfaceName)
@@ -377,27 +489,7 @@ func processCommand() int {
 		span.Finish()
 	})
 
-	// gather the running vmm metadata:
-	runMetadata := &metadata.MDRun{
-		Type: metadata.MetadataTypeRun,
-	}
-
-	strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
-		Chroot:         jailingFcConfig.JailerChrootDirectory(),
-		RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
-		SSHUser:        machineConfig.SSHUser,
-		PublicKeys: []ssh.PublicKey{
-			sshPublicKey,
-		},
-		Tracer:      tracer,
-		SpanContext: spanRootfsCopy.Context(),
-	}
-
 	strategy := configs.DefaultFirectackerStrategy(machineConfig).
-		AddRequirements(func() *arbitrary.HandlerPlacement {
-			return arbitrary.NewHandlerPlacement(strategy.
-				NewPseudoCloudInitHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
-		}).
 		AddRequirements(func() *arbitrary.HandlerPlacement {
 			// add this one after the previous one so by he logic,
 			// this one will be placed and executed before the first one
@@ -405,7 +497,9 @@ func processCommand() int {
 				NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 		})
 
-	spanVMMCreate := tracer.StartSpan("rootfs-vmm-create", opentracing.ChildOf(spanRootfsCopy.Context()))
+	spanRootfsBuildMetadata.Finish()
+
+	spanVMMCreate := tracer.StartSpan("rootfs-vmm-create", opentracing.ChildOf(spanRootfsBuildMetadata.Context()))
 
 	vmmProvider := vmm.NewDefaultProvider(cniConfig, jailingFcConfig, machineConfig).
 		WithHandlersAdapter(strategy).
@@ -430,95 +524,87 @@ func processCommand() int {
 
 	spanVMMStart.Finish()
 
+	spanBootstrapping := tracer.StartSpan("rootfs-boostrapping", opentracing.FollowsFrom(spanRootfsServerStart.Context()))
+
 	ipAddress := runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP
 	gateway := runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.Gateway
 
 	vmmLogger = vmmLogger.With("ip-address", ipAddress)
 
-	vmmLogger.Info("VMM running", "gateway", gateway)
+	vmmLogger.Info("VMM running, waiting for bootstrap to finish", "gateway", gateway)
 
-	spanRemoteConnect := tracer.StartSpan("rootfs-remote-connect", opentracing.ChildOf(spanVMMStart.Context()))
+	// --
+	// Waiting for bootstrap to complete
+	// --
 
-	remoteClient, remoteErr := remote.Connect(context.Background(), remote.ConnectConfig{
-		SSHPrivateKey:      *rsaPrivateKey,
-		SSHUsername:        machineConfig.SSHUser,
-		IP:                 net.ParseIP(ipAddress),
-		Port:               machineConfig.SSHPort,
-		EnableAgentForward: machineConfig.SSHEnableAgentForward,
-	}, vmmLogger.Named("remote-client"))
+	chanAborted := make(chan error, 1)
+	chanSucceeded := make(chan struct{}, 1)
 
-	if remoteErr != nil {
-		startedMachine.Stop(vmmCtx, nil)
-		vmmLogger.Error("Failed connecting to remote", "reason", remoteErr)
-		spanRemoteConnect.SetBaggageItem("error", remoteErr.Error())
-		spanRemoteConnect.Finish()
+	select {
+	case <-time.After(commandConfig.BootstrapInitialCommunicationTimeout):
+		spanBootstrapping.SetBaggageItem("error", "VM did not communicate within timeout, bootstrap aborted")
+		spanBootstrapping.Finish()
+		vmmLogger.Error("VM did not communicate within timeout, aborting bootstrap")
+		startedMachine.StopAndWait(vmmCtx)
 		return 1
-	}
-
-	spanRemoteConnect.Finish()
-
-	vmmLogger.Info("Connected via SSH")
-
-	if !egressTestConfig.EgressNoWait {
-		spanEgressWait := tracer.StartSpan("rootfs-egress-wait", opentracing.ChildOf(spanRemoteConnect.Context()))
-		egressCtx, egressWaitCancelFunc := context.WithTimeout(vmmCtx, time.Second*time.Duration(egressTestConfig.EgressTestTimeoutSeconds))
-		defer egressWaitCancelFunc()
-
-		egressTarget := egressTestConfig.EgressTestTarget
-		if egressTarget == "" && gateway != "" {
-			egressTarget = gateway
-		}
-
-		if egressTarget == "" {
-			err := fmt.Errorf("egress test not possible without egress target: no gateway nor explicit target")
-			startedMachine.Stop(vmmCtx, remoteClient)
-			vmmLogger.Error(err.Error())
-			spanEgressWait.SetBaggageItem("error", err.Error())
-			spanEgressWait.Finish()
+	case firstMessage := <-rootfsServer.OnMessage():
+		// first message must be the commands fetched control message:
+		switch firstMessage.(type) {
+		case *rootfs.ControlMsgCommandsRequested:
+		default:
+			// invalid communication from the client:
+			spanBootstrapping.SetBaggageItem("error", "VM not initiated communication with commands request")
+			spanBootstrapping.Finish()
+			vmmLogger.Error("invalid communication from the client, expected *rootfs.ControlMsgCommandsRequested", "received", fmt.Sprintf("%_T", firstMessage))
+			startedMachine.StopAndWait(vmmCtx)
 			return 1
 		}
+	}
 
-		if err := remoteClient.WaitForEgress(egressCtx, egressTarget); err != nil {
-			startedMachine.Stop(vmmCtx, remoteClient)
-			vmmLogger.Error("did not get egress connectivity within a timeout", "reason", err)
-			spanEgressWait.SetBaggageItem("error", err.Error())
-			spanEgressWait.Finish()
-			return 1
+	go func() {
+		for {
+			nextMessage := <-rootfsServer.OnMessage()
+			switch tNextMessage := nextMessage.(type) {
+			case *rootfs.ClientMsgAborted:
+				chanAborted <- tNextMessage.Error
+				return
+			case *rootfs.ClientMsgSuccess:
+				close(chanSucceeded)
+				return
+			case *rootfs.ClientMsgStderr:
+				for _, line := range tNextMessage.Lines {
+					fmt.Fprintln(os.Stderr, strings.TrimSpace(line))
+				}
+			case *rootfs.ClientMsgStdout:
+				for _, line := range tNextMessage.Lines {
+					fmt.Fprintln(os.Stdout, strings.TrimSpace(line))
+				}
+			case *rootfs.ControlMsgPingSent:
+				rootLogger.Debug("received ping from bootstrap client")
+			}
 		}
-		spanEgressWait.Finish()
-	} else {
-		vmmLogger.Debug("Egress test explicitly skipped")
-	}
+	}()
 
-	postBuildCommands := []commands.Run{}
-	for _, cmd := range commandConfig.PostBuildCommands {
-		postBuildCommands = append(postBuildCommands, commands.RunWithDefaults(cmd))
-	}
-	preBuildCommands := []commands.Run{}
-	for _, cmd := range commandConfig.PreBuildCommands {
-		preBuildCommands = append(preBuildCommands, commands.RunWithDefaults(cmd))
-	}
-
-	spanBuildExec := tracer.StartSpan("rootfs-build-exec", opentracing.ChildOf(spanRemoteConnect.Context()))
-
-	if buildErr := buildContext.
-		WithLogger(vmmLogger.Named("builder")).
-		WithPostBuildCommands(postBuildCommands...).
-		WithPreBuildCommands(preBuildCommands...).
-		WithDependencyResources(dependencyResources).
-		Build(remoteClient); err != nil {
-		startedMachine.Stop(vmmCtx, remoteClient)
-		vmmLogger.Error("Failed boostrapping remote via SSH", "reason", buildErr)
-		spanBuildExec.SetBaggageItem("error", buildErr.Error())
-		spanBuildExec.Finish()
+	select {
+	case abortError := <-chanAborted:
+		spanBootstrapping.SetBaggageItem("error", abortError.Error())
+		spanBootstrapping.Finish()
+		vmmLogger.Error("VM aborted bootstrap with error", "reason", abortError)
+		startedMachine.StopAndWait(vmmCtx)
 		return 1
+	case <-chanSucceeded:
+		vmmLogger.Info("VM finished bootstrap successfully")
 	}
 
-	spanBuildExec.Finish()
+	spanBootstrapping.Finish()
 
-	spanStop := tracer.StartSpan("rootfs-vmm-stop", opentracing.ChildOf(spanBuildExec.Context()))
+	// --
+	// END / Waiting for bootstrap to complete
+	// --
 
-	startedMachine.StopAndWait(vmmCtx, remoteClient)
+	spanStop := tracer.StartSpan("rootfs-vmm-stop", opentracing.FollowsFrom(spanBootstrapping.Context()))
+
+	startedMachine.StopAndWait(vmmCtx)
 
 	spanStop.Finish()
 
@@ -534,7 +620,7 @@ func processCommand() int {
 		return 1
 	}
 
-	buildEntrypointInfo := buildContext.EntrypointInfo()
+	buildEntrypointInfo := contextBuilder.EntrypointInfo()
 
 	fsFileName := filepath.Base(machineConfig.RootfsOverride())
 	createdRootfsFile := filepath.Join(jailingFcConfig.JailerChrootDirectory(), "root", fsFileName)
@@ -561,12 +647,12 @@ func processCommand() int {
 				Image:   name,
 				Version: version,
 			},
-			Labels:  buildContext.Metadata(),
+			Labels:  contextBuilder.Metadata(),
 			Parent:  resolvedRootfs.Metadata(),
-			Ports:   buildContext.ExposedPorts(),
+			Ports:   contextBuilder.ExposedPorts(),
 			Tag:     commandConfig.Tag,
 			Type:    metadata.MetadataTypeRootfs,
-			Volumes: buildContext.Volumes(),
+			Volumes: contextBuilder.Volumes(),
 		},
 		Org:     org,
 		Image:   name,

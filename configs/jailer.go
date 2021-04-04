@@ -24,7 +24,6 @@ import (
 // Example: /firecracker-v0.22.4-x86_64/sifuqm4rq2runxparjcx/root/run/firecracker.socket.
 //
 // Using more than 31 characters for the --chroot-base value, regardless if in the profile setting or using the command --chroot-base flag, will lead to a very obscure error.
-
 const ChrootBaseMaxLength = 31
 
 // JailingFirecrackerConfig represents Jailerspecific configuration options.

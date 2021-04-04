@@ -14,7 +14,7 @@ const (
 	MetadataExtractorName = "fcinit.MetadataExtractor"
 )
 
-// NewPseudoCloudInitHandler returns a firecracker handler which can be used to inject state into
+// NewMetadataExtractorHandler returns a firecracker handler which can be used to inject state into
 // a virtual machine file system prior to start.
 func NewMetadataExtractorHandler(logger hclog.Logger, md *metadata.MDRun) firecracker.Handler {
 	return firecracker.Handler{

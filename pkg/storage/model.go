@@ -26,6 +26,7 @@ type RootfsLookup struct {
 	Version string
 }
 
+// RootfsStore identifies rootfs storage arguments.
 type RootfsStore struct {
 	LocalPath string
 	Metadata  interface{}

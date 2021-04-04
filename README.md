@@ -7,7 +7,7 @@ A set of tools to build, run and operate Firecracker VMMs directly from `Dockerf
 Feel free to change the `ipam.subnet` or set multiple ones. `host-local` IPAM [CNI plugin documentation](https://www.cni.dev/plugins/ipam/host-local/).
 
 ```sh
-cat <<EOF > /firecracker/cni/conf.d/machine-builds.conflist
+cat <<EOF > /etc/cni/conf.d/machine-builds.conflist
 {
     "name": "machine-builds",
     "cniVersion": "0.4.0",
@@ -36,10 +36,20 @@ cat <<EOF > /firecracker/cni/conf.d/machine-builds.conflist
 EOF
 ```
 
+## clone and build from sources
+
+```sh
+mkdir -p $GOPATH/src/github.com/combust-labs/firebuild
+cd $GOPATH/src/github.com/combust-labs/firebuild
+go install
+```
+
+The binary will be placed in `$GOPATH/bin/firebuild`.
+
 ## Create a profile
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go profile-create \
+sudo $GOPATH/bin/firebuild profile-create \
 	--profile=standard \
 	--binary-firecracker=$(readlink /usr/bin/firecracker) \
 	--binary-jailer=$(readlink /usr/bin/jailer) \
@@ -50,6 +60,8 @@ sudo /usr/local/go/bin/go run ./main.go profile-create \
 	--storage-provider-property-string="kernel-storage-root=/firecracker/vmlinux" \
 	--tracing-enable
 ```
+
+### Caution
 
 The [maximum socket path in the Linux Kernel](https://github.com/torvalds/linux/blob/master/include/uapi/linux/un.h) is `107` characters + `\0`:
 
@@ -86,14 +98,14 @@ In the above example, the path is `114` characters long. Changing the chroot to 
 Build a base operating system root file system. For example, Debian Buster slim:
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go baseos \
+sudo $GOPATH/bin/firebuild baseos \
     --profile=standard \
     --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile
 ```
 
 Because the `baseos` root file system is built completely with Docker, there is no need to configure the kernel storage.
 
-It's possible to tag the baseos output using the `--tag=` argument, for example:
+It's possible to tag the `baseos` output using the `--tag=` argument, for example:
 
 ```sh
 sudo /usr/local/go/bin/go run ./main.go baseos \
@@ -104,39 +116,72 @@ sudo /usr/local/go/bin/go run ./main.go baseos \
 
 ### Why
 
-TODO: explain why is the base operating system rootfs required.
+`firebuild` uses the Docker metaphor. An image of an application is built `FROM` a base. An application image can be built `FROM alpine:3.13`, for example. Or `FROM debian:buster-slim`, or `FROM registry.access.redhat.com/ubi8/ubi-minimal:8.3` and dozens others.
+
+In order to fulfill those semantics, a base operating system image must be built before the application root file system can be created.
 
 ## Create a Postgres 13 VMM rootfs from Debian Buster Dockerfile
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go rootfs \
+sudo $GOPATH/bin/firebuild rootfs \
     --profile=standard \
     --dockerfile=git+https://github.com/docker-library/postgres.git:/13/Dockerfile \
     --cni-network-name=machine-builds \
-    --ssh-user=debian \
     --vmlinux-id=vmlinux-v5.8 \
-    --pre-build-command='chmod 1777 /tmp' \
-    --log-as-json \
     --mem=512 \
-    --tag=tests/postgres:13
+    --tag=combust-labs/postgres:13
 ```
 
-TODO: revisit the paragraph below
+## Create a separate CNI network for running VMs
 
-This service will not start automatically because the Postgres server requires an additional `export POSTGRES_PASSWORD=...` environment variable in the `/etc/firebuild/cmd.env` file. Right now, one needs to SSH to the VMM, `sudo echo 'export POSTGRES_PASSWORD' >> /etc/firebuild/cmd.env` and `sudo service DockerEntrypoint.sh start` to start the database.
+For example:
+
+```sh
+cat <<EOF > /etc/cni/conf.d/machines.conflist
+{
+    "name": "machines",
+    "cniVersion": "0.4.0",
+    "plugins": [
+        {
+            "type": "bridge",
+            "name": "machines-bridge",
+            "bridge": "machines0",
+            "isDefaultGateway": true,
+            "ipMasq": true,
+            "hairpinMode": true,
+            "ipam": {
+                "type": "host-local",
+                "subnet": "192.168.127.0/24",
+                "resolvConf": "/etc/resolv.conf"
+            }
+        },
+        {
+            "type": "firewall"
+        },
+        {
+            "type": "tc-redirect-tap"
+        }
+    ]
+}
+EOF
+```
 
 ## Run the VMM from the resulting tag
 
 Once the root file system is built, start the VMM:
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go run \
+sudo $GOPATH/bin/firebuild run \
     --profile=standard \
-    --from=tests/postgres:13 \
-    --cni-network-name=alpine \
-    --ssh-user=debian \
-    --vmlinux-id=vmlinux-v5.8
+    --from=combust-labs/postgres:13 \
+    --cni-network-name=machines \
+    --vmlinux-id=vmlinux-v5.8 \
+    --mem=512
 ```
+
+**TODO: revisit the paragraph below**
+
+This service will not start automatically because the Postgres server requires an additional `export POSTGRES_PASSWORD=...` environment variable in the `/etc/firebuild/cmd.env` file. Right now, one needs to SSH to the VMM, `sudo echo 'export POSTGRES_PASSWORD' >> /etc/firebuild/cmd.env` and `sudo service DockerEntrypoint.sh start` to start the database.
 
 ### Additional settings
 
@@ -144,8 +189,8 @@ sudo /usr/local/go/bin/go run ./main.go run \
 - `--env-file`: full path to the environment file, multiple OK
 - `--env`: environment variable to deploy to configure the VMM with, multiple OK, format `--env=VAR_NAME=value`
 - `--hostname`: hostname to apply to the VMM
+- `--ssh-user`: username to get access to the VM via SSH with, these are defined in the `baseos` Dockerfiles and follow the EC2 pattern: `alpine` for Alpine images and `debian` for Debian image; together with `--identity-file` allows access to the running VM via SSH
 - `--identity-file`: full path to the publish SSH key to deploy to the running VMM
-- `--disable-pseudo-cloud-init`: disables inecting environment variables, hostname and identity files into the VMM
 
 ### Environment merging
 
@@ -182,7 +227,7 @@ To get the VMM ID, look closely at the output of the `run ... --detached` comman
 Copy the VMM ID from the output and run:
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go kill --vmm-id=${VMMID}
+sudo $GOPATH/bin/firebuild kill --profile=standard --vmm-id=${VMMID}
 ```
 
 ### Purging remains of the VMMs stopped without the kill command
@@ -196,13 +241,13 @@ If a VMM exits in any other way than via `kill` command, following data continue
 To remove this data, run the `purge` command. 
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go purge
+sudo $GOPATH/bin/firebuild purge --profile=standard
 ```
 
 ### List VMMs
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go ls
+sudo $GOPATH/bin/firebuild ls --profile=standard
 ```
 
 Example output:
@@ -216,17 +261,12 @@ Example output:
 It's possible to reference a `Dockerfile` residing in the git repository available under a HTTP(s) URL. Here's an example:
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go rootfs \
+sudo $GOPATH/bin/firebuild rootfs \
     --profile=standard \
     --dockerfile=git+https://github.com/hashicorp/docker-consul.git:/0.X/Dockerfile#master \
     --cni-network-name=machine-builds \
-    --ssh-user=alpine \
     --vmlinux-id=vmlinux-v5.8 \
-    --post-build-command='chmod -x /etc/init.d/sshd' \
-    --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
-    --log-as-json \
-    --tag=tests/consul:1.9.3 \
-    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
+    --tag=combust-labs/consul:1.9.4
 ```
 
 The URL format is:
@@ -288,21 +328,17 @@ The build program does not support:
 
 ## Multi-stage Dockerfile builds
 
-The program intends to support multi-stage `Dockerfile` builds. An example with [grepplabs Kafka Proxy](https://github.com/grepplabs/kafka-proxy).
+`firebuild` supports multi-stage `Dockerfile` builds. An example with [grepplabs Kafka Proxy](https://github.com/grepplabs/kafka-proxy).
 
-Build v0.2.8 using git repository link, leave SSH access on:
+Build `v0.2.8` using git repository link:
 
 ```sh
-/usr/local/go/bin/go run ./main.go rootfs \
+sudo $GOPATH/bin/firebuild rootfs \
     --profile=standard \
     --dockerfile=git+https://github.com/grepplabs/kafka-proxy.git:/Dockerfile#v0.2.8 \
     --cni-network-name=machine-builds \
-    --ssh-user=alpine \
     --vmlinux-id=vmlinux-v5.8 \
-    --pre-build-command='rm -rf /var/cache/apk && mkdir -p /var/cache/apk && sudo apk update' \
-    --log-as-json \
-    --tag=tests/kafka-proxy:0.2.8 \
-    --service-file-installer=$(pwd)/baseos/_/alpine/alpine.local.d.service.sh
+    --tag=combust-labs/kafka-proxy:0.2.8
 ```
 
 ## Tracing
@@ -336,6 +372,3 @@ The default value of the `--tracing-collector-host-port` is `127.0.0.1:6831`. To
 
 Unless explcitly stated: AGPL-3.0 License.
 
-Excluded from the license:
-
-- `remote/scp.go`: sourced from Terraform SSH communicator

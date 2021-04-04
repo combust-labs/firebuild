@@ -7,7 +7,6 @@ import (
 
 	"github.com/combust-labs/firebuild/configs"
 	"github.com/combust-labs/firebuild/pkg/metadata"
-	"github.com/combust-labs/firebuild/pkg/remote"
 	"github.com/combust-labs/firebuild/pkg/vmm/cni"
 	"github.com/combust-labs/firebuild/pkg/vmm/pid"
 	"github.com/firecracker-microvm/firecracker-go-sdk"
@@ -22,9 +21,9 @@ type StartedMachine interface {
 	// Decorates metadata with additional properties.
 	DecorateMetadata(*metadata.MDRun) error
 	// Stop stops the VMM, remote connected client may be nil.
-	Stop(context.Context, remote.ConnectedClient) StoppedOK
+	Stop(context.Context) StoppedOK
 	// StopAndWait stops the VMM and waits for the VMM to stop, remote connected client may be nil.
-	StopAndWait(context.Context, remote.ConnectedClient)
+	StopAndWait(context.Context)
 	// Wait awaits for the VMM exit.
 	Wait(context.Context)
 }
@@ -62,7 +61,7 @@ func (m *defaultStartedMachine) DecorateMetadata(md *metadata.MDRun) error {
 	return nil
 }
 
-func (m *defaultStartedMachine) Stop(ctx context.Context, remoteClient remote.ConnectedClient) StoppedOK {
+func (m *defaultStartedMachine) Stop(ctx context.Context) StoppedOK {
 	m.Lock()
 	defer m.Unlock()
 
@@ -70,13 +69,6 @@ func (m *defaultStartedMachine) Stop(ctx context.Context, remoteClient remote.Co
 		m.wasStopped = true
 	} else {
 		return StoppedGracefully
-	}
-
-	if remoteClient != nil {
-		m.logger.Info("Closing remote client...")
-		if err := remoteClient.Close(); err != nil {
-			m.logger.Info("Remote client closed", "error", err)
-		}
 	}
 
 	shutdownCtx, cancelFunc := context.WithTimeout(ctx, time.Second*time.Duration(m.machineConfig.ShutdownGracefulTimeoutSeconds))
@@ -116,9 +108,9 @@ func (m *defaultStartedMachine) Stop(ctx context.Context, remoteClient remote.Co
 	return stoppedState
 }
 
-func (m *defaultStartedMachine) StopAndWait(ctx context.Context, remoteClient remote.ConnectedClient) {
+func (m *defaultStartedMachine) StopAndWait(ctx context.Context) {
 	go func() {
-		if m.Stop(ctx, remoteClient) == StoppedForcefully {
+		if m.Stop(ctx) == StoppedForcefully {
 			m.logger.Warn("Machine was not stopped gracefully, see previous errors. It's possible that the file system may not be complete. Retry or proceed with caution.")
 		}
 	}()

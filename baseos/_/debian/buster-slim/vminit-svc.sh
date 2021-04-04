@@ -11,7 +11,7 @@
 #                    initializes the VM using MMDS metadata.
 ### END INIT INFO
 
-PATH=/sbin:/bin:/usr/bin:/usr/local/bin
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 pidfile="/var/run/firebuild-entrypoint.pid"
 
 . /lib/init/vars.sh

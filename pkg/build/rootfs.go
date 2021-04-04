@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/combust-labs/firebuild/pkg/build/commands"
-	"github.com/combust-labs/firebuild/pkg/build/env"
-	"github.com/combust-labs/firebuild/pkg/build/resources"
-	"github.com/combust-labs/firebuild/pkg/remote"
+	"github.com/combust-labs/firebuild-shared/build/commands"
+	"github.com/combust-labs/firebuild-shared/build/resources"
+	"github.com/combust-labs/firebuild-shared/build/rootfs"
+	"github.com/combust-labs/firebuild-shared/env"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/hashicorp/go-hclog"
 )
@@ -16,14 +16,13 @@ import (
 // Build represents the build operation.
 type Build interface {
 	AddInstructions(...interface{}) error
-	Build(remote.ConnectedClient) error
+	CreateContext(rootfs.Resources) (*rootfs.WorkContext, error)
 	EntrypointInfo() *EntrypointInfo
 	ExposedPorts() []string
 	From() commands.From
 	Metadata() map[string]string
 	Volumes() []string
 	WithBuildArgs(map[string]string) Build
-	WithDependencyResources(map[string][]resources.ResolvedResource) Build
 	WithExcludes([]string) Build
 	WithLogger(hclog.Logger) Build
 	WithPostBuildCommands(...commands.Run) Build
@@ -32,39 +31,42 @@ type Build interface {
 }
 
 type defaultBuild struct {
-	buildArgs          map[string]string
-	buildEnv           env.BuildEnv
-	currentArgs        map[string]string
-	currentCmd         commands.Cmd
-	currentEntrypoint  commands.Entrypoint
-	currentEnv         map[string]string
-	currentMetadata    map[string]string
-	currentShell       commands.Shell
-	currentUser        commands.User
-	currentWorkdir     commands.Workdir
-	dependentResources map[string][]resources.ResolvedResource
-	exposedPorts       []string
-	excludes           []string
-	from               commands.From
-	instructions       []interface{}
-	isDependencyBuild  bool
-	logger             hclog.Logger
-	resolver           resources.Resolver
+	buildArgs         map[string]string
+	buildEnv          env.BuildEnv
+	currentArgs       map[string]string
+	currentCmd        commands.Cmd
+	currentEntrypoint commands.Entrypoint
+	currentEnv        map[string]string
+	currentMetadata   map[string]string
+	currentShell      commands.Shell
+	currentUser       commands.User
+	currentWorkdir    commands.Workdir
+
+	exposedPorts      []string
+	excludes          []string
+	from              commands.From
+	instructions      []interface{}
+	isDependencyBuild bool
+	logger            hclog.Logger
+	resolver          resources.Resolver
 
 	postBuildCommands []commands.Run
 	preBuildCommands  []commands.Run
 
-	resolvedResources map[string][]resources.ResolvedResource
-
 	volumes []string
 }
 
-func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
+func (b *defaultBuild) CreateContext(dependencies rootfs.Resources) (*rootfs.WorkContext, error) {
+
+	ctx := &rootfs.WorkContext{
+		ExecutableCommands: []commands.VMInitSerializableCommand{},
+		ResourcesResolved:  make(rootfs.Resources),
+	}
 
 	patternMatcher, matcherCreateErr := fileutils.NewPatternMatcher(b.excludes)
 	if matcherCreateErr != nil {
 		b.logger.Error("failed creating excludes pattern matcher", "reason", matcherCreateErr)
-		return matcherCreateErr
+		return nil, matcherCreateErr
 	}
 
 	b.logger.Info("building from", "base", b.from.BaseImage)
@@ -76,127 +78,115 @@ func (b *defaultBuild) Build(remoteClient remote.ConnectedClient) error {
 			resolvedResource, err := b.resolver.ResolveAdd(tcommand)
 			if err != nil {
 				b.logger.Error("failed resolving ADD resource", "reason", err)
-				return err
+				return nil, err
 			}
-			b.resolvedResources[tcommand.Source] = resolvedResource
+			ctx.ResourcesResolved[tcommand.Source] = resolvedResource
 		case commands.Copy:
 			resolvedResource, err := b.resolver.ResolveCopy(tcommand)
 			if err != nil {
 				b.logger.Error("failed resolving COPY resource", "reason", err)
-				return err
+				return nil, err
 			}
-			b.resolvedResources[tcommand.Source] = resolvedResource
+			ctx.ResourcesResolved[tcommand.Source] = resolvedResource
 		}
 	}
 
 	for _, cmd := range b.preBuildCommands {
-		if err := remoteClient.RunCommand(cmd); err != nil {
-			return err
+		ctx.ExecutableCommands = append(ctx.ExecutableCommands, cmd)
+	}
+
+	patternMatcherFunc := func(input string) bool {
+		pathMatched, matchErr := patternMatcher.Matches(input)
+		if matchErr != nil {
+			b.logger.Warn("error while matching path for PutResource ADD, skipping", "source", input, "reason", matchErr)
+			return false // skip this resource
 		}
+		if !pathMatched {
+			// file to be excluded
+			b.logger.Debug("skipping excluded path for PutResource ADD", "source", input)
+			return false
+		}
+		return true
 	}
 
 	for _, command := range b.instructions {
 		switch tcommand := command.(type) {
 		case commands.Add:
-			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
-
-				pathMatched, matchErr := patternMatcher.Matches(tcommand.Source)
-				if matchErr != nil {
-					b.logger.Warn("error while matching path for PutResource ADD, skipping", "source", tcommand.Source, "reason", matchErr)
-					continue // skip this resource
-				}
-				if pathMatched {
-					// file to be excluded
-					b.logger.Debug("skipping excluded path for PutResource ADD", "source", tcommand.Source)
-					continue
-				}
-
-				b.logger.Info("Putting ADD resource", "source", tcommand.Source)
-				for _, resourceItem := range resource {
-					if err := remoteClient.PutResource(resourceItem); err != nil {
-						b.logger.Error("PutResource ADD resource failed", "source", tcommand.Source, "reason", err)
-						return err
-					}
-				}
-			} else {
-				b.logger.Error("resource ADD type required but not resolved", "source", tcommand.Source)
-			}
-		case commands.Copy:
-
-			pathMatched, matchErr := patternMatcher.Matches(tcommand.Source)
-			if matchErr != nil {
-				b.logger.Warn("error while matching path for PutResource COPY, skipping", "source", tcommand.Source, "reason", matchErr)
-				continue // skip this resource
-			}
-			if pathMatched {
-				// file to be excluded
-				b.logger.Debug("skipping excluded path for PutResource COPY", "source", tcommand.Source)
+			if patternMatcherFunc(tcommand.Source) {
 				continue
 			}
-
+			if _ /* resource */, ok := ctx.ResourcesResolved[tcommand.Source]; ok {
+				b.logger.Info("Putting ADD resource", "source", tcommand.Source)
+				ctx.ExecutableCommands = append(ctx.ExecutableCommands, tcommand)
+			} else {
+				b.logger.Error("ADD resource required but not resolved", "source", tcommand.Source)
+			}
+		case commands.Copy:
+			if patternMatcherFunc(tcommand.Source) {
+				continue
+			}
 			// dependency resources exist for COPY commands only:
 			if tcommand.Stage != "" {
 				// we need to locate a dependency resource
-				dependencyResources, ok := b.dependentResources[tcommand.Stage]
+				dependencyResources, ok := dependencies[tcommand.Stage]
 				if !ok {
 					b.logger.Error("PutResource COPY resource failed, no dependency resource stage", "source", tcommand.Source, "stage", tcommand.Stage)
-					return fmt.Errorf("no dependency stage %s", tcommand.Stage)
+					return nil, fmt.Errorf("no dependency stage %s", tcommand.Stage)
 				}
 				resourceWasProcessed := false
 				for _, dependencyResource := range dependencyResources {
 					if strings.HasPrefix(dependencyResource.SourcePath(), tcommand.Source) {
+
 						b.logger.Info("Putting COPY resource from dependency", "source", tcommand.Source, "stage", tcommand.Stage)
-						if err := remoteClient.PutResource(dependencyResource); err != nil {
-							b.logger.Error("PutResource COPY resource failed", "source", tcommand.Source, "stage", tcommand.Stage, "reason", err)
-							return err
-						}
+
+						sourcePath := fmt.Sprintf("%s://%s", tcommand.Stage, dependencyResource.SourcePath())
+
+						ctx.ResourcesResolved[sourcePath] = []resources.ResolvedResource{dependencyResource}
+
+						ctx.ExecutableCommands = append(ctx.ExecutableCommands, commands.Copy{
+							OriginalCommand:    tcommand.OriginalCommand,
+							OriginalSource:     dependencyResource.ResolvedURIOrPath(),
+							Source:             sourcePath,
+							Target:             dependencyResource.TargetPath(),
+							Workdir:            tcommand.Workdir,
+							Stage:              tcommand.Stage,
+							User:               tcommand.User,
+							UserFromLocalChown: tcommand.UserFromLocalChown,
+						})
+
 						resourceWasProcessed = true
 					}
 				}
 				if !resourceWasProcessed {
-					b.logger.Error("resource COPY type required from stage but not resolved", "source", tcommand.Source, "stage", tcommand.Stage)
+					b.logger.Error("COPY resource required from stage but not resolved", "source", tcommand.Source, "stage", tcommand.Stage)
 				}
 				continue
 			}
-
-			b.logger.Info("Putting COPY resource", "source", tcommand.Source)
-			if resource, ok := b.resolvedResources[tcommand.Source]; ok {
-				for _, resourceItem := range resource {
-					if err := remoteClient.PutResource(resourceItem); err != nil {
-						b.logger.Error("PutResource COPY resource failed", "source", tcommand.Source, "reason", err)
-						return err
-					}
-				}
+			if _ /* resource */, ok := ctx.ResourcesResolved[tcommand.Source]; ok {
+				b.logger.Info("Putting COPY resource", "source", tcommand.Source)
+				ctx.ExecutableCommands = append(ctx.ExecutableCommands, tcommand)
 			} else {
-				b.logger.Error("resource COPY type required but not resolved", "source", tcommand.Source)
+				b.logger.Error("COPY resource required but not resolved", "source", tcommand.Source)
 			}
 
 		case commands.Run:
-			if err := remoteClient.RunCommand(tcommand); err != nil {
-				b.logger.Error("RunCommand failed", "reason", err)
-				return err
-			}
+			ctx.ExecutableCommands = append(ctx.ExecutableCommands, tcommand)
 		case commands.Volume:
 			for _, vol := range tcommand.Values {
 				b.volumes = append(b.volumes, vol)
 				run := commands.RunWithDefaults(fmt.Sprintf("mkdir -p '%s'", vol))
 				run.User = tcommand.User
 				run.Workdir = tcommand.Workdir
-				if err := remoteClient.RunCommand(run); err != nil {
-					b.logger.Error("RunCommand for VOLUME command failed", "reason", err)
-					return err
-				}
+				ctx.ExecutableCommands = append(ctx.ExecutableCommands, run)
 			}
 		}
 	}
 
 	for _, cmd := range b.postBuildCommands {
-		if err := remoteClient.RunCommand(cmd); err != nil {
-			return err
-		}
+		ctx.ExecutableCommands = append(ctx.ExecutableCommands, cmd)
 	}
 
-	return nil
+	return ctx, nil
 }
 
 func (b *defaultBuild) AddInstructions(instructions ...interface{}) error {
@@ -295,11 +285,6 @@ func (b *defaultBuild) WithBuildArgs(input map[string]string) Build {
 	return b
 }
 
-func (b *defaultBuild) WithDependencyResources(input map[string][]resources.ResolvedResource) Build {
-	b.dependentResources = input
-	return b
-}
-
 func (b *defaultBuild) WithExcludes(input []string) Build {
 	b.excludes = input
 	return b
@@ -340,7 +325,6 @@ func NewDefaultBuild() Build {
 		instructions:      []interface{}{},
 		logger:            hclog.Default(),
 		resolver:          resources.NewDefaultResolver(),
-		resolvedResources: map[string][]resources.ResolvedResource{},
 		volumes:           []string{},
 	}
 }

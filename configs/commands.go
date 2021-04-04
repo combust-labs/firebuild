@@ -107,6 +107,11 @@ type RootfsCommandConfig struct {
 	PostBuildCommands []string
 	PreBuildCommands  []string
 	Tag               string
+
+	BootstrapCertsKeySize                int
+	BootstrapCertsValidity               time.Duration
+	BootstrapInitialCommunicationTimeout time.Duration
+	BootstrapServerBindInterface         string
 }
 
 // NewRootfsCommandConfig returns new command configuration.
@@ -123,6 +128,11 @@ func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringArrayVar(&c.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
 		c.flagSet.StringArrayVar(&c.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
 		c.flagSet.StringVar(&c.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
+
+		c.flagSet.IntVar(&c.BootstrapCertsKeySize, "bootstrap-certs-key-size", 2048, "Embedded CA bootstrap certificates key size, recommended values: 2048 or 4096")
+		c.flagSet.DurationVar(&c.BootstrapCertsValidity, "bootstrap-certs-validity", time.Minute*5, "The period for which the embedded bootstrap certificates are valid for")
+		c.flagSet.DurationVar(&c.BootstrapInitialCommunicationTimeout, "bootstrap-initial-communication-timeout", time.Second*30, "Howlong to wait for vminit to initiate bootstrap with commands request before considering bootstrap failed")
+		c.flagSet.StringVar(&c.BootstrapServerBindInterface, "bootstrap-server-bind-interface", "eno1", "The interface to bind the bootstrap server on")
 	}
 	return c.flagSet
 }
@@ -132,13 +142,12 @@ type RunCommandConfig struct {
 	flagBase
 	ValidatingConfig
 
-	Daemonize           bool
-	EnableFileBasedInit bool
-	EnvFiles            []string
-	EnvVars             map[string]string
-	From                string
-	IdentityFiles       []string
-	Hostname            string
+	Daemonize     bool
+	EnvFiles      []string
+	EnvVars       map[string]string
+	From          string
+	IdentityFiles []string
+	Hostname      string
 }
 
 // NewRunCommandConfig returns new command configuration.
@@ -150,7 +159,6 @@ func NewRunCommandConfig() *RunCommandConfig {
 func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
 		c.flagSet.BoolVar(&c.Daemonize, "daemonize", false, "When set, runs the VMM in the detached mode")
-		c.flagSet.BoolVar(&c.EnableFileBasedInit, "enable-file-based-init", false, "If set, enables file based init on run")
 		c.flagSet.StringArrayVar(&c.EnvFiles, "env-file", []string{}, "Full path to an environment file to apply to the VMM during bootstrap, multiple OK")
 		c.flagSet.StringToStringVar(&c.EnvVars, "env", map[string]string{}, "Additional environment variables to apply to the VMM during bootstrap, multiple OK")
 		c.flagSet.StringVar(&c.From, "from", "", "The image to launch from, for example: tests/postgres:13")

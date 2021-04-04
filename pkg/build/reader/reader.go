@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/combust-labs/firebuild/pkg/build/commands"
+	"github.com/combust-labs/firebuild-shared/build/commands"
 	bcErrors "github.com/combust-labs/firebuild/pkg/build/errors"
 	"github.com/docker/docker/builder/dockerignore"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"

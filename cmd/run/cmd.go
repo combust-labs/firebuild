@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/combust-labs/firebuild-shared/build/commands"
 	"github.com/combust-labs/firebuild/configs"
-	"github.com/combust-labs/firebuild/pkg/build/commands"
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/profiles"
@@ -34,15 +34,14 @@ var Command = &cobra.Command{
 }
 
 var (
-	cniConfig        = configs.NewCNIConfig()
-	commandConfig    = configs.NewRunCommandConfig()
-	egressTestConfig = configs.NewEgressTestConfig()
-	jailingFcConfig  = configs.NewJailingFirecrackerConfig()
-	logConfig        = configs.NewLogginConfig()
-	machineConfig    = configs.NewMachineConfig()
-	profilesConfig   = configs.NewProfileCommandConfig()
-	runCache         = configs.NewRunCacheConfig()
-	tracingConfig    = configs.NewTracingConfig("firebuild-vmm-run")
+	cniConfig       = configs.NewCNIConfig()
+	commandConfig   = configs.NewRunCommandConfig()
+	jailingFcConfig = configs.NewJailingFirecrackerConfig()
+	logConfig       = configs.NewLogginConfig()
+	machineConfig   = configs.NewMachineConfig()
+	profilesConfig  = configs.NewProfileCommandConfig()
+	runCache        = configs.NewRunCacheConfig()
+	tracingConfig   = configs.NewTracingConfig("firebuild-vmm-run")
 
 	storageResolver = resolver.NewDefaultResolver()
 )
@@ -50,7 +49,6 @@ var (
 func initFlags() {
 	Command.Flags().AddFlagSet(cniConfig.FlagSet())
 	Command.Flags().AddFlagSet(commandConfig.FlagSet())
-	Command.Flags().AddFlagSet(egressTestConfig.FlagSet())
 	Command.Flags().AddFlagSet(jailingFcConfig.FlagSet())
 	Command.Flags().AddFlagSet(logConfig.FlagSet())
 	Command.Flags().AddFlagSet(machineConfig.FlagSet())
@@ -262,44 +260,13 @@ func processCommand() int {
 		Type:     metadata.MetadataTypeRun,
 	}
 
-	vmmStrategy := configs.DefaultFirectackerStrategy(machineConfig)
-
-	if commandConfig.EnableFileBasedInit {
-		vmmEnvironment, envErr := commandConfig.MergedEnvironment()
-		if envErr != nil {
-			rootLogger.Error("failed merging environment", "reason", envErr)
-			return 1
-		}
-		strategyPublicKeys, keysErr := commandConfig.PublicKeys()
-		if keysErr != nil {
-			rootLogger.Error("failed reading an SSH key configured with --identity-file", "reason", keysErr)
-			return 1
-		}
-		strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
-			Chroot:         jailingFcConfig.JailerChrootDirectory(),
-			RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
-			SSHUser:        machineConfig.SSHUser,
-			Metadata:       runMetadata,
-			// VMM settings:
-			Environment: vmmEnvironment,
-			Hostname:    commandConfig.Hostname,
-			PublicKeys:  strategyPublicKeys,
-
-			SpanContext: spanRootfsCopy.Context(),
-			Tracer:      tracer,
-		}
-		vmmStrategy = vmmStrategy.AddRequirements(func() *arbitrary.HandlerPlacement {
+	vmmStrategy := configs.DefaultFirectackerStrategy(machineConfig).
+		AddRequirements(func() *arbitrary.HandlerPlacement {
+			// add this one after the previous one so by he logic,
+			// this one will be placed and executed before the first one
 			return arbitrary.NewHandlerPlacement(strategy.
-				NewPseudoCloudInitHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
+				NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 		})
-	}
-
-	vmmStrategy = vmmStrategy.AddRequirements(func() *arbitrary.HandlerPlacement {
-		// add this one after the previous one so by he logic,
-		// this one will be placed and executed before the first one
-		return arbitrary.NewHandlerPlacement(strategy.
-			NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
-	})
 
 	spanVMMCreate := tracer.StartSpan("run-vmm-create", opentracing.ChildOf(spanRootfsCopy.Context()))
 
@@ -338,7 +305,7 @@ func processCommand() int {
 
 	metadataErr := startedMachine.DecorateMetadata(runMetadata)
 	if metadataErr != nil {
-		startedMachine.Stop(vmmCtx, nil)
+		startedMachine.Stop(vmmCtx)
 		vmmLogger.Error("Failed fetching machine metadata", "reason", metadataErr)
 		return 1
 	}
@@ -392,7 +359,7 @@ func installSignalHandlers(ctx context.Context, logger hclog.Logger, m vmm.Start
 			switch s := <-c; {
 			case s == syscall.SIGTERM || s == os.Interrupt:
 				logger.Info("Caught SIGINT, requesting clean shutdown")
-				chanStopped <- m.Stop(ctx, nil)
+				chanStopped <- m.Stop(ctx)
 			}
 		}
 	}()

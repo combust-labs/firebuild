@@ -117,6 +117,7 @@ type MDRunCNI struct {
 
 // MDRun contains the runtime information about a VMM.
 type MDRun struct {
+	Bootstrap         *mmds.MMDSBootstrap  `json:"bootstrap,omitempty" mapstructure:"bootstrap,omitempty"`
 	CNI               MDRunCNI             `json:"cni" mapstructure:"cni"`
 	Configs           MDRunConfigs         `json:"configs" mapstructure:"configs"`
 	Drives            []models.Drive       `json:"drivers" mapstructure:"drives"`
@@ -129,6 +130,7 @@ type MDRun struct {
 	Type              Type                 `json:"type" mapstructure:"type"`
 }
 
+// AsMMDS converts the run metadata to MMDS metadata.
 func (r *MDRun) AsMMDS() (interface{}, error) {
 
 	env, err := r.Configs.RunConfig.MergedEnvironment()
@@ -140,7 +142,7 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 		return nil, errors.Wrap(err, "failed fetching public keys")
 	}
 
-	entrypointJson, err := r.Rootfs.EntrypointInfo.ToJsonString()
+	entrypointJSON, err := r.Rootfs.EntrypointInfo.ToJsonString()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed fetching public keys")
 	}
@@ -148,7 +150,8 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 	metadata := &mmds.MMDSLatest{
 		Latest: &mmds.MMDSLatestMetadata{
 			Metadata: &mmds.MMDSData{
-				VMMID: r.VMMID,
+				Bootstrap: r.Bootstrap,
+				VMMID:     r.VMMID,
 				Drives: func() map[string]*mmds.MMDSDrive {
 					result := map[string]*mmds.MMDSDrive{}
 					for _, drive := range r.Drives {
@@ -162,7 +165,7 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 					}
 					return result
 				}(),
-				EntrypointJSON: entrypointJson,
+				EntrypointJSON: entrypointJSON,
 				Env:            env,
 				LocalHostname:  r.Configs.RunConfig.Hostname,
 				Machine: &mmds.MMDSMachine{
@@ -179,19 +182,18 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 						result := map[string]*mmds.MMDSNetworkInterface{}
 						for _, nic := range r.NetworkInterfaces {
 							result[nic.StaticConfiguration.MacAddress] = &mmds.MMDSNetworkInterface{
-								HostDevName: nic.StaticConfiguration.HostDevName,
-								Gateway:     nic.StaticConfiguration.IPConfiguration.Gateway,
-								IfName:      nic.StaticConfiguration.IPConfiguration.IfName,
-								IP:          nic.StaticConfiguration.IPConfiguration.IP,
-								IPAddr:      nic.StaticConfiguration.IPConfiguration.IPAddr,
-								IPMask:      nic.StaticConfiguration.IPConfiguration.IPMask,
-								IPNet:       nic.StaticConfiguration.IPConfiguration.IPNet,
-								Nameservers: strings.Join(nic.StaticConfiguration.IPConfiguration.Nameservers, ","),
+								HostDeviceName: nic.StaticConfiguration.HostDevName,
+								Gateway:        nic.StaticConfiguration.IPConfiguration.Gateway,
+								IfName:         nic.StaticConfiguration.IPConfiguration.IfName,
+								IP:             nic.StaticConfiguration.IPConfiguration.IP,
+								IPAddr:         nic.StaticConfiguration.IPConfiguration.IPAddr,
+								IPMask:         nic.StaticConfiguration.IPConfiguration.IPMask,
+								IPNet:          nic.StaticConfiguration.IPConfiguration.IPNet,
+								Nameservers:    strings.Join(nic.StaticConfiguration.IPConfiguration.Nameservers, ","),
 							}
 						}
 						return result
 					}(),
-					SSHPort: fmt.Sprintf("%d", r.Configs.Machine.SSHPort),
 				},
 				ImageTag: r.Rootfs.Tag,
 				Users: func() map[string]*mmds.MMDSUser {
