@@ -112,34 +112,19 @@ func (b *defaultBuild) CreateContext(dependencies rootfs.Resources) (*rootfs.Wor
 	for _, command := range b.instructions {
 		switch tcommand := command.(type) {
 		case commands.Add:
-
 			if patternMatcherFunc(tcommand.Source) {
 				continue
 			}
-
 			if _ /* resource */, ok := ctx.ResourcesResolved[tcommand.Source]; ok {
-
 				b.logger.Info("Putting ADD resource", "source", tcommand.Source)
-
 				ctx.ExecutableCommands = append(ctx.ExecutableCommands, tcommand)
-
-				/* TODO: fixme
-				for _, resourceItem := range resource {
-					if err := remoteClient.PutResource(resourceItem); err != nil {
-						b.logger.Error("PutResource ADD resource failed", "source", tcommand.Source, "reason", err)
-						return err
-					}
-				}
-				*/
 			} else {
 				b.logger.Error("ADD resource required but not resolved", "source", tcommand.Source)
 			}
 		case commands.Copy:
-
 			if patternMatcherFunc(tcommand.Source) {
 				continue
 			}
-
 			// dependency resources exist for COPY commands only:
 			if tcommand.Stage != "" {
 				// we need to locate a dependency resource
@@ -177,20 +162,9 @@ func (b *defaultBuild) CreateContext(dependencies rootfs.Resources) (*rootfs.Wor
 				}
 				continue
 			}
-
 			if _ /* resource */, ok := ctx.ResourcesResolved[tcommand.Source]; ok {
-
 				b.logger.Info("Putting COPY resource", "source", tcommand.Source)
 				ctx.ExecutableCommands = append(ctx.ExecutableCommands, tcommand)
-
-				/* TODO: fixme
-				for _, resourceItem := range resource {
-					if err := remoteClient.PutResource(resourceItem); err != nil {
-						b.logger.Error("PutResource COPY resource failed", "source", tcommand.Source, "reason", err)
-						return err
-					}
-				}
-				*/
 			} else {
 				b.logger.Error("COPY resource required but not resolved", "source", tcommand.Source)
 			}

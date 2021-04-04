@@ -336,6 +336,3 @@ The default value of the `--tracing-collector-host-port` is `127.0.0.1:6831`. To
 
 Unless explcitly stated: AGPL-3.0 License.
 
-Excluded from the license:
-
-- `remote/scp.go`: sourced from Terraform SSH communicator

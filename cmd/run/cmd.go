@@ -260,44 +260,13 @@ func processCommand() int {
 		Type:     metadata.MetadataTypeRun,
 	}
 
-	vmmStrategy := configs.DefaultFirectackerStrategy(machineConfig)
-
-	if commandConfig.EnableFileBasedInit {
-		vmmEnvironment, envErr := commandConfig.MergedEnvironment()
-		if envErr != nil {
-			rootLogger.Error("failed merging environment", "reason", envErr)
-			return 1
-		}
-		strategyPublicKeys, keysErr := commandConfig.PublicKeys()
-		if keysErr != nil {
-			rootLogger.Error("failed reading an SSH key configured with --identity-file", "reason", keysErr)
-			return 1
-		}
-		strategyConfig := &strategy.PseudoCloudInitHandlerConfig{
-			Chroot:         jailingFcConfig.JailerChrootDirectory(),
-			RootfsFileName: filepath.Base(machineConfig.RootfsOverride()),
-			SSHUser:        machineConfig.SSHUser,
-			Metadata:       runMetadata,
-			// VMM settings:
-			Environment: vmmEnvironment,
-			Hostname:    commandConfig.Hostname,
-			PublicKeys:  strategyPublicKeys,
-
-			SpanContext: spanRootfsCopy.Context(),
-			Tracer:      tracer,
-		}
-		vmmStrategy = vmmStrategy.AddRequirements(func() *arbitrary.HandlerPlacement {
+	vmmStrategy := configs.DefaultFirectackerStrategy(machineConfig).
+		AddRequirements(func() *arbitrary.HandlerPlacement {
+			// add this one after the previous one so by he logic,
+			// this one will be placed and executed before the first one
 			return arbitrary.NewHandlerPlacement(strategy.
-				NewPseudoCloudInitHandler(rootLogger, strategyConfig), firecracker.CreateBootSourceHandlerName)
+				NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
 		})
-	}
-
-	vmmStrategy = vmmStrategy.AddRequirements(func() *arbitrary.HandlerPlacement {
-		// add this one after the previous one so by he logic,
-		// this one will be placed and executed before the first one
-		return arbitrary.NewHandlerPlacement(strategy.
-			NewMetadataExtractorHandler(rootLogger, runMetadata), firecracker.CreateBootSourceHandlerName)
-	})
 
 	spanVMMCreate := tracer.StartSpan("run-vmm-create", opentracing.ChildOf(spanRootfsCopy.Context()))
 
