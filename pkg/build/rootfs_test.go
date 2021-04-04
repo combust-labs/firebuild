@@ -2,7 +2,6 @@ package build
 
 import (
 	"fmt"
-	"io"
 	"io/fs"
 	"io/ioutil"
 	"os"
@@ -35,9 +34,9 @@ func TestContextBuilderMultiStageWithResources(t *testing.T) {
 	expectedResource1Bytes := []byte("resource 1 content")
 	expectedResource2Bytes := []byte("resource 2 content")
 
-	mustPutTestResource(t, dockerfilePath, []byte(testDockerfileMultiStage))
-	mustPutTestResource(t, filepath.Join(tempDir, "resource1"), []byte(expectedResource1Bytes))
-	mustPutTestResource(t, filepath.Join(tempDir, "resource2"), []byte(expectedResource2Bytes))
+	rootfs.MustPutTestResource(t, dockerfilePath, []byte(testDockerfileMultiStage))
+	rootfs.MustPutTestResource(t, filepath.Join(tempDir, "resource1"), []byte(expectedResource1Bytes))
+	rootfs.MustPutTestResource(t, filepath.Join(tempDir, "resource2"), []byte(expectedResource2Bytes))
 
 	readResult, err := reader.ReadFromString(dockerfilePath, tempDir)
 	if err != nil {
@@ -74,9 +73,9 @@ func TestContextBuilderMultiStageWithResources(t *testing.T) {
 
 	t.Run("it=succeeds when dependency resources exist", func(tt *testing.T) {
 
-		mustPutTestResource(tt, filepath.Join(tempDir, "etc/test/file1"), []byte("etc/test/file1"))
-		mustPutTestResource(tt, filepath.Join(tempDir, "etc/test/file2"), []byte("etc/test/file2"))
-		mustPutTestResource(tt, filepath.Join(tempDir, "etc/test/subdir/subdir-file1"), []byte("etc/test/subdir/subdir-file1"))
+		rootfs.MustPutTestResource(tt, filepath.Join(tempDir, "etc/test/file1"), []byte("etc/test/file1"))
+		rootfs.MustPutTestResource(tt, filepath.Join(tempDir, "etc/test/file2"), []byte("etc/test/file2"))
+		rootfs.MustPutTestResource(tt, filepath.Join(tempDir, "etc/test/subdir/subdir-file1"), []byte("etc/test/subdir/subdir-file1"))
 
 		// construct resolved resources from the written files:
 		dependencyResources := rootfs.Resources{
@@ -100,9 +99,9 @@ func TestContextBuilderMultiStageWithResources(t *testing.T) {
 			tt.Fatal("GRPC client Commands() opErr", opErr)
 		}
 
-		mustBeRunCommand(tt, testClient)
-		mustBeAddCommand(tt, testClient, expectedResource1Bytes)
-		mustBeCopyCommand(tt, testClient, expectedResource2Bytes)
+		rootfs.MustBeRunCommand(tt, testClient)
+		rootfs.MustBeAddCommand(tt, testClient, expectedResource1Bytes)
+		rootfs.MustBeCopyCommand(tt, testClient, expectedResource2Bytes)
 		// directories do not have a byte content, they always return empty bytes:
 		// since we have:
 		// - /etc/test: dir
@@ -111,8 +110,8 @@ func TestContextBuilderMultiStageWithResources(t *testing.T) {
 		// - /etc/test/subdir: dir
 		// - /etc/test/subdir/subdir-file1: file
 		// we expect the following:
-		mustBeCopyCommand(tt, testClient, []byte{}, []byte("etc/test/file1"), []byte("etc/test/file2"), []byte{}, []byte("etc/test/subdir/subdir-file1"))
-		mustBeRunCommand(tt, testClient)
+		rootfs.MustBeCopyCommand(tt, testClient, []byte{}, []byte("etc/test/file1"), []byte("etc/test/file2"), []byte{}, []byte("etc/test/subdir/subdir-file1"))
+		rootfs.MustBeRunCommand(tt, testClient)
 		assert.Nil(tt, testClient.NextCommand())
 
 		testClient.Success()
@@ -138,9 +137,9 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 	expectedResource1Bytes := []byte("resource 1 content")
 	expectedResource2Bytes := []byte("resource 2 content")
 
-	mustPutTestResource(t, dockerfilePath, []byte(testDockerfileSingleStage))
-	mustPutTestResource(t, filepath.Join(tempDir, "resource1"), []byte(expectedResource1Bytes))
-	mustPutTestResource(t, filepath.Join(tempDir, "resource2"), []byte(expectedResource2Bytes))
+	rootfs.MustPutTestResource(t, dockerfilePath, []byte(testDockerfileSingleStage))
+	rootfs.MustPutTestResource(t, filepath.Join(tempDir, "resource1"), []byte(expectedResource1Bytes))
+	rootfs.MustPutTestResource(t, filepath.Join(tempDir, "resource2"), []byte(expectedResource2Bytes))
 
 	readResult, err := reader.ReadFromString(dockerfilePath, tempDir)
 	if err != nil {
@@ -165,10 +164,10 @@ func TestContextBuilderSingleStageWithResources(t *testing.T) {
 		t.Fatal("GRPC client Commands() opErr", opErr)
 	}
 
-	mustBeRunCommand(t, testClient)
-	mustBeAddCommand(t, testClient, expectedResource1Bytes)
-	mustBeCopyCommand(t, testClient, expectedResource2Bytes)
-	mustBeRunCommand(t, testClient)
+	rootfs.MustBeRunCommand(t, testClient)
+	rootfs.MustBeAddCommand(t, testClient, expectedResource1Bytes)
+	rootfs.MustBeCopyCommand(t, testClient, expectedResource2Bytes)
+	rootfs.MustBeRunCommand(t, testClient)
 	assert.Nil(t, testClient.NextCommand())
 
 	testClient.Success()
@@ -206,70 +205,6 @@ func TestDockerignoreMatches(t *testing.T) {
 		if status != v {
 			t.Error("Expected != result for path", k, fmt.Sprintf("%v vs %v", v, status))
 		}
-	}
-}
-
-func mustPutTestResource(t *testing.T, path string, contents []byte) {
-	if err := os.MkdirAll(filepath.Dir(path), fs.ModePerm); err != nil {
-		t.Fatal("failed creating parent directory for the resource, got error", err)
-	}
-	if err := ioutil.WriteFile(path, contents, fs.ModePerm); err != nil {
-		t.Fatal("expected resource to be written, got error", err)
-	}
-}
-
-func mustReadFromReader(reader io.ReadCloser, _ error) ([]byte, error) {
-	return ioutil.ReadAll(reader)
-}
-
-func mustBeAddCommand(t *testing.T, testClient rootfs.ClientProvider, expectedContents ...[]byte) {
-	if addCommand, ok := testClient.NextCommand().(commands.Add); !ok {
-		t.Fatal("expected ADD command")
-	} else {
-		mustReadResources(t, testClient, addCommand.Source, expectedContents...)
-
-	}
-}
-
-func mustBeCopyCommand(t *testing.T, testClient rootfs.ClientProvider, expectedContents ...[]byte) {
-	if copyCommand, ok := testClient.NextCommand().(commands.Copy); !ok {
-		t.Fatal("expected COPY command")
-	} else {
-		mustReadResources(t, testClient, copyCommand.Source, expectedContents...)
-	}
-}
-
-func mustReadResources(t *testing.T, testClient rootfs.ClientProvider, source string, expectedContents ...[]byte) {
-	resourceChannel, err := testClient.Resource(source)
-	if err != nil {
-		t.Fatal("expected resource channel for COPY command, got error", err)
-	}
-
-	idx := 0
-out:
-	for {
-		select {
-		case item := <-resourceChannel:
-			switch titem := item.(type) {
-			case nil:
-				break out // break out on nil
-			case resources.ResolvedResource:
-				resourceData, err := mustReadFromReader(titem.Contents())
-				if err != nil {
-					t.Fatal("expected resource to read, got error", err)
-				}
-				assert.Equal(t, expectedContents[idx], resourceData)
-				idx = idx + 1
-			case error:
-				t.Fatal("received an error while reading ADD resource", titem)
-			}
-		}
-	}
-}
-
-func mustBeRunCommand(t *testing.T, testClient rootfs.ClientProvider) {
-	if _, ok := testClient.NextCommand().(commands.Run); !ok {
-		t.Fatal("expected RUN command")
 	}
 }
 
