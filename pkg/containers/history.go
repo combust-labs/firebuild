@@ -43,7 +43,7 @@ func reconstructFileCommand(input string) string {
 	// CONSIDER: maybe the parsing has to be a bit more bulletproof but for now, it does the job...
 	path := fileCommandExtractor.ReplaceAllString(input, "")
 	if strings.HasPrefix(input, "ADD") {
-		return fmt.Sprintf("ADD tar://%s %s", path, path)
+		return fmt.Sprintf("ADD %s %s", path, path)
 	}
-	return fmt.Sprintf("COPY tar://%s %s", path, path)
+	return fmt.Sprintf("COPY %s %s", path, path)
 }
