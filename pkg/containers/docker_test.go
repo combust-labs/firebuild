@@ -2,8 +2,15 @@ package containers
 
 import (
 	"context"
+	"io/fs"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
+	"github.com/combust-labs/firebuild/pkg/build/reader"
 	"github.com/hashicorp/go-hclog"
 	"github.com/stretchr/testify/assert"
 )
@@ -60,4 +67,58 @@ func TestDockerfileFromHistory(t *testing.T) {
 	dockerfileLines := HistoryToDockerfile(imageMetadata.Config.History, "alpine:3.13")
 
 	assert.Equal(t, expectedLines, dockerfileLines)
+
+	tempDir, err := ioutil.TempDir("", "")
+	if err != nil {
+		t.Fatal("expected temp dir, got error", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	if err := ioutil.WriteFile(filepath.Join(tempDir, "Dockerfile"), []byte(strings.Join(dockerfileLines, "\n")), fs.ModePerm); err != nil {
+		t.Fatal("expected Dockerfile to be written, got error", err)
+	}
+
+	readResult, err := reader.ReadFromString(filepath.Join(tempDir, "Dockerfile"), tempDir)
+	if err != nil {
+		t.Fatal("expected Dockerfile to be read, got error", err)
+	}
+
+	t.Log(readResult)
+
+	exportResources := []*ImageResourceExportCommand{}
+	for _, cmd := range readResult.Commands() {
+		imageExportResource, err := ImageResourceExportFromCommand(cmd)
+		if err != nil {
+			continue
+		}
+		exportResources = append(exportResources, imageExportResource)
+	}
+
+	resources, err := ImageExportResources(context.Background(), dockerClient, logger, tempDir, exportResources, "jaegertracing/all-in-one:1.22")
+	if err != nil {
+		t.Fatal("expected resources from the Docker image, got error", err)
+	}
+
+	expectedResources := []string{
+		filepath.Join(tempDir, "etc/jaeger/sampling_strategies.json"),
+		filepath.Join(tempDir, "etc/ssl/certs/ca-certificates.crt"),
+		filepath.Join(tempDir, "go/bin/all-in-one-linux"),
+	}
+
+	readResources := []string{}
+
+	for _, resource := range resources {
+		readResources = append(readResources, resource.ResolvedURIOrPath())
+	}
+
+	sort.Strings(expectedResources)
+	sort.Strings(readResources)
+
+	assert.Equal(t, expectedResources, readResources)
+
+	for _, readResource := range readResources {
+		_, statErr := os.Stat(readResource)
+		assert.Nil(t, statErr)
+	}
+
 }
