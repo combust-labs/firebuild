@@ -2,7 +2,7 @@ package containers
 
 import (
 	tar "archive/tar"
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +19,8 @@ import (
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/hashicorp/go-hclog"
 	"github.com/opentracing/opentracing-go"
+
+	"github.com/pkg/errors"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -252,34 +254,7 @@ func ImageBuild(ctx context.Context, client *docker.Client, logger hclog.Logger,
 		return buildErr
 	}
 
-	// read output:
-	scanner := bufio.NewScanner(buildResponse.Body)
-	lastLine := ""
-	for scanner.Scan() {
-		lastLine := scanner.Text()
-		out := &dockerOutStream{}
-		if err := json.Unmarshal([]byte(lastLine), out); err != nil {
-			opLogger.Warn("Docker build output not a stream line, skipping", "reason", err)
-			continue
-		}
-		opLogger.Info("docker image build status", "stream", strings.TrimSpace(out.Stream))
-	}
-
-	// deal with failed builds:
-	errLine := &dockerErrorLine{}
-	json.Unmarshal([]byte(lastLine), errLine)
-	if errLine.Error != "" {
-		opLogger.Error("Docker image build finished with error", "reason", errLine.Error)
-		return fmt.Errorf(errLine.Error)
-	}
-
-	if scannerErr := scanner.Err(); scannerErr != nil {
-		opLogger.Error("Docker response scanner finished with error", "reason", scannerErr)
-		return scannerErr
-	}
-
-	// all okay:
-	return nil
+	return processDockerOutput(opLogger, buildResponse.Body, dockerReaderStream())
 }
 
 // ImageExportStageDependentResources exports resources from a given Docker image indicated by tag.
@@ -292,67 +267,44 @@ func ImageExportStageDependentResources(ctx context.Context, client *docker.Clie
 	stage stage.Stage,
 	exportsRoot string, externalCopies []commands.Copy, tagName string) ([]resources.ResolvedResource, error) {
 
-	/*
-	   Function extracts prefixes from the Docker image.
-	   The tar file exported from Docker contains a directory for every layer.
-	   Each layer directory contains 3 files: VERSION, json and layer.tar
-	   Complete example:
-	   -------------------------------------------------------------------------------------------------------------------------
-	   drwxr-xr-x 0/0               0 2021-03-02 20:05 0b7ef4d8f09fb5aef4ee6cf368d0a76dc915a5e1292249d21b46c7a10740bfb5/
-	   -rw-r--r-- 0/0               3 2021-03-02 20:05 0b7ef4d8f09fb5aef4ee6cf368d0a76dc915a5e1292249d21b46c7a10740bfb5/VERSION
-	   -rw-r--r-- 0/0             477 2021-03-02 20:05 0b7ef4d8f09fb5aef4ee6cf368d0a76dc915a5e1292249d21b46c7a10740bfb5/json
-	   -rw-r--r-- 0/0            2560 2021-03-02 20:05 0b7ef4d8f09fb5aef4ee6cf368d0a76dc915a5e1292249d21b46c7a10740bfb5/layer.tar
-	   drwxr-xr-x 0/0               0 2021-03-02 20:05 214907aec1a34d707f3f25123e2b52ffe174c784e9dd9feb631ce0025977b065/
-	   -rw-r--r-- 0/0               3 2021-03-02 20:05 214907aec1a34d707f3f25123e2b52ffe174c784e9dd9feb631ce0025977b065/VERSION
-	   -rw-r--r-- 0/0             477 2021-03-02 20:05 214907aec1a34d707f3f25123e2b52ffe174c784e9dd9feb631ce0025977b065/json
-	   -rw-r--r-- 0/0       300947456 2021-03-02 20:05 214907aec1a34d707f3f25123e2b52ffe174c784e9dd9feb631ce0025977b065/layer.tar
-	   -rw-r--r-- 0/0            6542 2021-03-02 20:05 24eca7c8603300acb80a237c13236d546ab7e91e25fab5638685b266c1e319ea.json
-	   drwxr-xr-x 0/0               0 2021-03-02 20:05 5686858b60db198d4cf472e7f07253186b904981edfe5208d2fcdaa32dbf1ee4/
-	   -rw-r--r-- 0/0               3 2021-03-02 20:05 5686858b60db198d4cf472e7f07253186b904981edfe5208d2fcdaa32dbf1ee4/VERSION
-	   -rw-r--r-- 0/0             477 2021-03-02 20:05 5686858b60db198d4cf472e7f07253186b904981edfe5208d2fcdaa32dbf1ee4/json
-	   -rw-r--r-- 0/0            4096 2021-03-02 20:05 5686858b60db198d4cf472e7f07253186b904981edfe5208d2fcdaa32dbf1ee4/layer.tar
-	   drwxr-xr-x 0/0               0 2021-03-02 20:05 58069b027e284e9a256e49a74c1b60e4f3ac22d51794ca92f3e24706d90858a7/
-	   -rw-r--r-- 0/0               3 2021-03-02 20:05 58069b027e284e9a256e49a74c1b60e4f3ac22d51794ca92f3e24706d90858a7/VERSION
-	   -rw-r--r-- 0/0             477 2021-03-02 20:05 58069b027e284e9a256e49a74c1b60e4f3ac22d51794ca92f3e24706d90858a7/json
-	   -rw-r--r-- 0/0       226923520 2021-03-02 20:05 58069b027e284e9a256e49a74c1b60e4f3ac22d51794ca92f3e24706d90858a7/layer.tar
-	   drwxr-xr-x 0/0               0 2021-03-02 20:05 647a40d74ab065cb5db4efe59470469cd1ee3ac219e23c2c69a66a7d55e2e548/
-	   -rw-r--r-- 0/0               3 2021-03-02 20:05 647a40d74ab065cb5db4efe59470469cd1ee3ac219e23c2c69a66a7d55e2e548/VERSION
-	   -rw-r--r-- 0/0             477 2021-03-02 20:05 647a40d74ab065cb5db4efe59470469cd1ee3ac219e23c2c69a66a7d55e2e548/json
-	   -rw-r--r-- 0/0            2560 2021-03-02 20:05 647a40d74ab065cb5db4efe59470469cd1ee3ac219e23c2c69a66a7d55e2e548/layer.tar
-	   drwxr-xr-x 0/0               0 2021-03-02 20:05 8196e5d2961481647c0faf63ce4c3518f4098df756e79c1fa7b496d902a6c67e/
-	   -rw-r--r-- 0/0               3 2021-03-02 20:05 8196e5d2961481647c0faf63ce4c3518f4098df756e79c1fa7b496d902a6c67e/VERSION
-	   -rw-r--r-- 0/0             477 2021-03-02 20:05 8196e5d2961481647c0faf63ce4c3518f4098df756e79c1fa7b496d902a6c67e/json
-	   -rw-r--r-- 0/0        22520832 2021-03-02 20:05 8196e5d2961481647c0faf63ce4c3518f4098df756e79c1fa7b496d902a6c67e/layer.tar
-	   drwxr-xr-x 0/0               0 2021-03-02 20:05 896d1cab2467fe9cc0281301e206c79c340991a03f36f5177d88c07d7b0d3592/
-	   -rw-r--r-- 0/0               3 2021-03-02 20:05 896d1cab2467fe9cc0281301e206c79c340991a03f36f5177d88c07d7b0d3592/VERSION
-	   -rw-r--r-- 0/0            1502 2021-03-02 20:05 896d1cab2467fe9cc0281301e206c79c340991a03f36f5177d88c07d7b0d3592/json
-	   -rw-r--r-- 0/0        79211008 2021-03-02 20:05 896d1cab2467fe9cc0281301e206c79c340991a03f36f5177d88c07d7b0d3592/layer.tar
-	   drwxr-xr-x 0/0               0 2021-03-02 20:05 b81e7efb7df998cf16f6597240c71007836ccef427880030fec1abb033cd7ddd/
-	   -rw-r--r-- 0/0               3 2021-03-02 20:05 b81e7efb7df998cf16f6597240c71007836ccef427880030fec1abb033cd7ddd/VERSION
-	   -rw-r--r-- 0/0             477 2021-03-02 20:05 b81e7efb7df998cf16f6597240c71007836ccef427880030fec1abb033cd7ddd/json
-	   -rw-r--r-- 0/0          760832 2021-03-02 20:05 b81e7efb7df998cf16f6597240c71007836ccef427880030fec1abb033cd7ddd/layer.tar
-	   drwxr-xr-x 0/0               0 2021-03-02 20:05 c7987d414b44d6c3a888b44a81ad6d9e52c09f482b95cb61ead8e575bb2b0a7f/
-	   -rw-r--r-- 0/0               3 2021-03-02 20:05 c7987d414b44d6c3a888b44a81ad6d9e52c09f482b95cb61ead8e575bb2b0a7f/VERSION
-	   -rw-r--r-- 0/0             401 2021-03-02 20:05 c7987d414b44d6c3a888b44a81ad6d9e52c09f482b95cb61ead8e575bb2b0a7f/json
-	   -rw-r--r-- 0/0         5847552 2021-03-02 20:05 c7987d414b44d6c3a888b44a81ad6d9e52c09f482b95cb61ead8e575bb2b0a7f/layer.tar
-	   -------------------------------------------------------------------------------------------------------------------------
-	*/
-
 	opLogger := logger.With("exports-root", exportsRoot, "tag-name", tagName)
 
 	resolvedResources := []resources.ResolvedResource{}
-	opCopies := []commands.Copy{}
+	opCopies := []*ImageResourceExportCommand{}
 
 	for _, externalCopy := range externalCopies {
 		if externalCopy.Stage != stage.Name() {
 			continue
 		}
-		opCopies = append(opCopies, externalCopy)
+		resourceExport, err := ImageResourceExportFromCommand(externalCopy)
+		if err != nil {
+			// skip only:
+			opLogger.Warn("command is not a resource export command", "command", externalCopy, "reason", err)
+			continue
+		}
+		opCopies = append(opCopies, resourceExport)
 	}
 
 	if len(opCopies) == 0 {
 		return resolvedResources, nil // shortcircuit, nothing to look up
 	}
+
+	// Make sure the owning directory exists:
+	opLogger.Debug("ensuring the exports root directory exists")
+	if err := os.MkdirAll(exportsRoot, fs.ModePerm); err != nil {
+		opLogger.Error("failed creating exports root directory on disk", "reason", err)
+		return resolvedResources, err
+	}
+
+	return ImageExportResources(ctx, client, opLogger, exportsRoot, opCopies, tagName)
+}
+
+// ImageExportResources exports selected resources from a Docker image.
+func ImageExportResources(ctx context.Context, client *docker.Client, opLogger hclog.Logger,
+	exportsRoot string, opCopies []*ImageResourceExportCommand, tagName string) ([]resources.ResolvedResource, error) {
+
+	resolvedResources := []resources.ResolvedResource{}
+
 	opLogger.Debug("exporting Docker stage build image")
 	imageID, err := FindImageIDByTag(ctx, client, tagName)
 	if err != nil {
@@ -362,23 +314,16 @@ func ImageExportStageDependentResources(ctx context.Context, client *docker.Clie
 
 	opLogger = opLogger.With("image-id", imageID)
 
-	// Make sure the owning directory exists:
-	opLogger.Debug("ensuring the exports root directory exists")
-	if err := os.MkdirAll(exportsRoot, fs.ModePerm); err != nil {
-		opLogger.Error("failed creating exports root directory on disk", "reason", err)
-		return resolvedResources, err
-	}
-
-	reader, err := client.ImageSave(ctx, []string{imageID})
+	dockerFsReader, cleanupFunc, err := getImageReader(ctx, client, imageID)
 	if err != nil {
 		opLogger.Error("failed creating io.Reader for image save", "reason", err)
 		return resolvedResources, err
 	}
-	defer reader.Close()
+	defer cleanupFunc()
 
 	opLogger.Debug("reading Docker image data")
 
-	dockerFsReader := tar.NewReader(reader)
+	matchedResourcesModTimes := map[string]matchedResourcesInfo{}
 
 	for {
 
@@ -413,6 +358,54 @@ func ImageExportStageDependentResources(ctx context.Context, client *docker.Clie
 					// files in the layer.tar to not have the leading /
 					if strings.HasPrefix("/"+layerHeader.Name, opCopy.Source) {
 						if !layerHeader.FileInfo().IsDir() {
+
+							replacesResourceAtIndex := -1
+							fullResourcePath := filepath.Join(exportsRoot, layerHeader.Name)
+							if existingMeta, ok := matchedResourcesModTimes[layerHeader.Name]; ok {
+								if layerHeader.ModTime.After(existingMeta.modTime) {
+									matchedResourcesModTimes[layerHeader.Name] = matchedResourcesInfo{
+										layer:   dockerFsHeader.Name,
+										modTime: layerHeader.ModTime,
+									}
+									// we have to replace a resource that was already fetched previously
+									for idx, res := range resolvedResources {
+										if fullResourcePath == res.ResolvedURIOrPath() {
+											opLogger.Debug("resource replaces previously read resource because of later modtime",
+												"resolved-path", fullResourcePath,
+												"previous-layer", existingMeta.layer,
+												"previous-mod-time", existingMeta.modTime,
+												"new-layer", dockerFsHeader.Name,
+												"new-mod-time", layerHeader.ModTime)
+											replacesResourceAtIndex = idx
+											break
+										}
+									}
+									if replacesResourceAtIndex == -1 {
+										opLogger.Warn("found previous modtime for resource but resource not matched by ResolvedURIOrPath",
+											"resolved-path", fullResourcePath,
+											"previous-layer", existingMeta.layer,
+											"previous-mod-time", existingMeta.modTime,
+											"new-layer", dockerFsHeader.Name,
+											"new-mod-time", existingMeta.modTime)
+									}
+
+								} else {
+									opLogger.Debug("same resource with later modtime already found in layer",
+										"resolved-path", fullResourcePath,
+										"later-layer", existingMeta.layer,
+										"later-mod-time", existingMeta.modTime,
+										"current-layer", dockerFsHeader.Name,
+										"current-mod-time", layerHeader.ModTime)
+									continue // skip reading older resource
+								}
+
+							} else {
+								matchedResourcesModTimes[layerHeader.Name] = matchedResourcesInfo{
+									layer:   dockerFsHeader.Name,
+									modTime: layerHeader.ModTime,
+								}
+							}
+
 							// gotta read the file...
 							opLogger.Debug("reading file", "layer", layerHeader.Name, "matched-prefix", opCopy.Source)
 							// --
@@ -474,8 +467,8 @@ func ImageExportStageDependentResources(ctx context.Context, client *docker.Clie
 								return file, nil
 							}
 
-							// we're dealing with only here:
-							resolvedResources = append(resolvedResources, resources.NewResolvedFileResourceWithPath(resourceReader,
+							// we're dealing with files only here:
+							newResource := resources.NewResolvedFileResourceWithPath(resourceReader,
 								layerHeader.FileInfo().Mode().Perm(),
 								opCopy.Source,
 								filepath.Join(opCopy.Target, filepath.Base(resourceFilePath)),
@@ -485,8 +478,13 @@ func ImageExportStageDependentResources(ctx context.Context, client *docker.Clie
 									}
 									return opCopy.User
 								}(),
-								resourceFilePath))
+								resourceFilePath)
 
+							if replacesResourceAtIndex > -1 {
+								resolvedResources[replacesResourceAtIndex] = newResource
+							} else {
+								resolvedResources = append(resolvedResources, newResource)
+							}
 						}
 					}
 				} // end for prefixes
@@ -496,6 +494,18 @@ func ImageExportStageDependentResources(ctx context.Context, client *docker.Clie
 	}
 
 	return resolvedResources, nil
+}
+
+// ImagePull pulls a Docker image.
+func ImagePull(ctx context.Context, client *docker.Client, logger hclog.Logger, refStr string) error {
+	response, err := client.ImagePull(ctx, refStr, types.ImagePullOptions{All: false})
+	if err != nil {
+		return err
+	}
+	if err := processDockerOutput(logger.Named("image-pull"), response, dockerReaderStatus()); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ImageRemove removes the Docker image using the tag name.
@@ -521,6 +531,82 @@ func ImageRemove(ctx context.Context, client *docker.Client, logger hclog.Logger
 			"untagged", response.Untagged)
 	}
 	return nil
+}
+
+// ReadImageConfig extracts the manifest and the image config from a Docker image.
+func ReadImageConfig(ctx context.Context, client *docker.Client, opLogger hclog.Logger, tagName string) (*DockerImageMetadata, error) {
+
+	imageID, err := FindImageIDByTag(ctx, client, tagName)
+	if err != nil {
+		opLogger.Error("failed fetching Docker image ID by tag", "reason", err)
+		return nil, err
+	}
+
+	opLogger = opLogger.With("image-id", imageID)
+
+	dockerFsReader, cleanupFunc, err := getImageReader(ctx, client, imageID)
+	if err != nil {
+		opLogger.Error("failed creating io.Reader for image save", "reason", err)
+		return nil, err
+	}
+	defer cleanupFunc()
+
+	jsonEntries := map[string]string{}
+
+	for {
+		dockerFsHeader, dockerFsError := dockerFsReader.Next()
+		if dockerFsError != nil {
+			if dockerFsError == io.EOF {
+				break
+			}
+			opLogger.Error("error while reading exported Docker file system", "reason", dockerFsError)
+			return nil, dockerFsError
+		}
+
+		// only interested in json files in the top directory:
+		if strings.HasSuffix(dockerFsHeader.Name, ".json") {
+			fullBuffer := bytes.NewBuffer([]byte{})
+			targetBuf := make([]byte, 512*1024)
+			for {
+				read, e := dockerFsReader.Read(targetBuf)
+				if read == 0 && e == io.EOF {
+					break
+				}
+				// write chunk to file:
+				fullBuffer.Grow(read)
+				fullBuffer.Write(targetBuf[0:read])
+			}
+			jsonEntries[dockerFsHeader.Name] = fullBuffer.String()
+		}
+	}
+
+	response := &DockerImageMetadata{}
+
+	if manifests, ok := jsonEntries["manifest.json"]; !ok {
+		return nil, fmt.Errorf("no manifest.json")
+	} else {
+		output := []*DockerImageManifest{}
+		if err := json.NewDecoder(bytes.NewBufferString(manifests)).Decode(&output); err != nil {
+			return nil, errors.Wrap(err, "failed deserializing manifest.json")
+		}
+		if len(output) == 0 {
+			return nil, fmt.Errorf("manifest.json without manifests, invalid image?")
+		}
+		response.Manifest = output[0]
+	}
+
+	if imageConfig, ok := jsonEntries[response.Manifest.Config]; !ok {
+		return nil, fmt.Errorf("manifest.json declared %q as config but config not found in image", response.Manifest.Config)
+	} else {
+		output := &DockerImageConfig{}
+		if err := json.NewDecoder(bytes.NewBufferString(imageConfig)).Decode(&output); err != nil {
+			return nil, errors.Wrapf(err, "failed deserializing config %q", response.Manifest.Config)
+		}
+		response.Config = output
+	}
+
+	return response, nil
+
 }
 
 func removeContainer(ctx context.Context, client *docker.Client, opLogger hclog.Logger, containerID string) {
@@ -564,17 +650,48 @@ func stopContainer(ctx context.Context, client *docker.Client, opLogger hclog.Lo
 	}
 }
 
-// -- docker output related types:
-
-type dockerOutStream struct {
-	Stream string `json:"stream"`
+func getImageReader(ctx context.Context, client *docker.Client, imageID string) (*tar.Reader, func(), error) {
+	reader, err := client.ImageSave(ctx, []string{imageID})
+	if err != nil {
+		return nil, nil, err
+	}
+	return tar.NewReader(reader), func() { reader.Close() }, nil
 }
 
-type dockerErrorLine struct {
-	Error       string            `json:"error"`
-	ErrorDetail dockerErrorDetail `json:"errorDetail"`
+// ImageResourceExportCommand is an internal resource export command.
+type ImageResourceExportCommand struct {
+	Source             string
+	Target             string
+	User               commands.User
+	UserFromLocalChown *commands.User
+	Workdir            commands.Workdir
 }
 
-type dockerErrorDetail struct {
-	Message string `json:"message"`
+// ImageResourceExportFromCommand converts an ADD and COPY command to a resource export command.
+func ImageResourceExportFromCommand(input interface{}) (*ImageResourceExportCommand, error) {
+	switch tinput := input.(type) {
+	case commands.Add:
+		return &ImageResourceExportCommand{
+			Source:             tinput.Source,
+			Target:             tinput.Target,
+			User:               tinput.User,
+			UserFromLocalChown: tinput.UserFromLocalChown,
+			Workdir:            tinput.Workdir,
+		}, nil
+	case commands.Copy:
+		return &ImageResourceExportCommand{
+			Source:             tinput.Source,
+			Target:             tinput.Target,
+			User:               tinput.User,
+			UserFromLocalChown: tinput.UserFromLocalChown,
+			Workdir:            tinput.Workdir,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported input resource")
+	}
+}
+
+type matchedResourcesInfo struct {
+	layer   string
+	modTime time.Time
 }

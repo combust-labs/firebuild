@@ -214,6 +214,27 @@ sudo $GOPATH/bin/firebuild run \
 
 The final environment variables are written to `/etc/profile.d/run-env.sh` file. All file specified with `--env-file` are merged first in the order of occurrcence, variables specified with `--env` are merged last.
 
+## build directly from a Docker image
+
+Sometimes having just the `Dockerfile` is not sufficient to execute a `rootfs` build. A good example is this [Jaeger all-in-one `Dockerfile`](https://github.com/jaegertracing/jaeger/blob/master/cmd/all-in-one/Dockerfile). The `Dockerfile` depends on the binary artifact built via `Makefile` prior to Docker build. In this case, it's possible to build the VM rootfs directly from the Docker image:
+
+```sh
+sudo $GOPATH/bin/firebuild rootfs \
+    --profile=standard \
+    --docker-image=jaegertracing/all-in-one:1.22 \
+    --docker-image-base=alpine:3.13 \
+    --cni-network-name=machine-builds \
+    --vmlinux-id=vmlinux-v5.8 \
+    --mem=512 \
+    --tag=combust-labs/jaeger-all-in-one:1.22
+```
+
+The `--docker-image-base` is required because the underlying operating system the image was built from cannot be established from the Docker manifest.
+
+### how does it work
+
+The builder pulls the requested Docker image with Docker. It then open the Docker image via the Docker `save` command and looks up the `manifest.json` and the Docker image config `json` explicitly stated in the manifest. When config is fetched, a temporary Dockerfile is built from the Docker config history. Any `ADD` and `COPY` commands for resources other than first `/` are used to extract files from the saved source image. When resources are exported, the build further continues exactly the same way as in case of the `Dockerfile` build.
+
 ## terminating a daemonized VM
 
 A VM started with the `--daemonize` flag can be stopped in three ways:
@@ -386,7 +407,7 @@ And configure respective commands with:
 
 The default value of the `--tracing-collector-host-port` is `127.0.0.1:6831`. To enable tracer log output, set `--tracing-log-enable` flag.
 
-## License
+## license
 
 Unless explcitly stated: AGPL-3.0 License.
 

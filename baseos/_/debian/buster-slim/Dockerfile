@@ -1,7 +1,7 @@
 FROM debian:buster-slim
 
 ARG VMINIT_URI=https://github.com/combust-labs/firebuild-mmds/releases/download
-ARG VMINIT_VERSION=0.0.11
+ARG VMINIT_VERSION=0.0.12
 ADD ${VMINIT_URI}/v${VMINIT_VERSION}/vminit-linux-amd64-${VMINIT_VERSION} /usr/bin/vminit
 
 ADD vminit-svc.sh /etc/init.d/vminit-svc.sh

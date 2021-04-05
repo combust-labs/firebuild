@@ -3,6 +3,8 @@ package rootfs
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"github.com/combust-labs/firebuild/pkg/build"
 	"github.com/combust-labs/firebuild/pkg/build/reader"
 	"github.com/combust-labs/firebuild/pkg/build/stage"
+	"github.com/combust-labs/firebuild/pkg/containers"
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/profiles"
@@ -123,6 +126,7 @@ func processCommand() int {
 
 	validatingConfigs := []configs.ValidatingConfig{
 		jailingFcConfig,
+		commandConfig,
 	}
 
 	for _, validatingConfig := range validatingConfigs {
@@ -169,6 +173,62 @@ func processCommand() int {
 	spanTempDir.Finish()
 
 	// -- Command specific:
+
+	if commandConfig.DockerImage != "" {
+		// prepare the build context based on the Docker image provided:
+		dockerClient, err := containers.GetDefaultClient()
+		if err != nil {
+			rootLogger.Error("failed fetching Docker client for image pull", "reason", err)
+			return 1
+		}
+		if err := containers.ImagePull(context.Background(), dockerClient, rootLogger, commandConfig.DockerImage); err != nil {
+			rootLogger.Error("failed pulling Docker image", "image", commandConfig.DockerImage, "reason", err)
+			return 1
+		}
+
+		imageMetadata, readErr := containers.ReadImageConfig(context.Background(), dockerClient, rootLogger, commandConfig.DockerImage)
+		if readErr != nil {
+			rootLogger.Error("failed reading Docker image config", "image", commandConfig.DockerImage, "reason", readErr)
+			return 1
+		}
+
+		dockerfileLines := containers.HistoryToDockerfile(imageMetadata.Config.History, commandConfig.DockerImageBase)
+		dockerfile := filepath.Join(cacheDirectory, "Dockerfile")
+
+		if err := ioutil.WriteFile(dockerfile, []byte(strings.Join(dockerfileLines, "\n")), fs.ModePerm); err != nil {
+			rootLogger.Error("failed writing Dockerfile for Docker image in build cache", "image", commandConfig.DockerImage, "reason", err)
+			return 1
+		}
+
+		readResult, err := reader.ReadFromString(dockerfile, cacheDirectory)
+		if err != nil {
+			rootLogger.Error("failed parsing Dockerfile for Docker image from build cache", "image", commandConfig.DockerImage, "reason", err)
+			return 1
+		}
+
+		exportResources := []*containers.ImageResourceExportCommand{}
+		for _, cmd := range readResult.Commands() {
+			imageExportResource, err := containers.ImageResourceExportFromCommand(cmd)
+			if err != nil {
+				continue
+			}
+			exportResources = append(exportResources, imageExportResource)
+		}
+
+		_, exportErr := containers.ImageExportResources(context.Background(),
+			dockerClient,
+			rootLogger,
+			cacheDirectory,
+			exportResources, commandConfig.DockerImage)
+		if exportErr != nil {
+			rootLogger.Error("failed exporting resources for Docker image", "image", commandConfig.DockerImage, "reason", exportErr)
+			return 1
+		}
+
+		commandConfig.Dockerfile = dockerfile
+		commandConfig.DockerfileStage = ""
+
+	}
 
 	spanParseDockerfile := tracer.StartSpan("rootfs-parse-dockerfile", opentracing.ChildOf(spanTempDir.Context()))
 

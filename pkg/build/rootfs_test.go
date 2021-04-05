@@ -19,6 +19,30 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestPathMatcher(t *testing.T) {
+
+	exclusions := []string{
+		"file/to/**/exclude",
+	}
+
+	patternMatcher, matcherCreateErr := fileutils.NewPatternMatcher(exclusions)
+	if matcherCreateErr != nil {
+		t.Fatal("failed creating excludes pattern matcher", matcherCreateErr)
+	}
+
+	matched1, err1 := patternMatcher.Matches("/go/bin/test-file")
+	assert.Nil(t, err1)
+	assert.False(t, matched1)
+
+	matched2, err2 := patternMatcher.Matches("file/to/some/exclude")
+	assert.Nil(t, err2)
+	assert.True(t, matched2)
+
+	matched3, err3 := patternMatcher.Matches("file/to/some-non-exclude")
+	assert.Nil(t, err3)
+	assert.False(t, matched3)
+}
+
 func TestContextBuilderMultiStageWithResources(t *testing.T) {
 	logger := hclog.Default()
 	logger.SetLevel(hclog.Debug)
