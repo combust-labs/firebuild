@@ -2,7 +2,7 @@ package containers
 
 import (
 	tar "archive/tar"
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +19,8 @@ import (
 	"github.com/combust-labs/firebuild/pkg/utils"
 	"github.com/hashicorp/go-hclog"
 	"github.com/opentracing/opentracing-go"
+
+	"github.com/pkg/errors"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -252,34 +254,7 @@ func ImageBuild(ctx context.Context, client *docker.Client, logger hclog.Logger,
 		return buildErr
 	}
 
-	// read output:
-	scanner := bufio.NewScanner(buildResponse.Body)
-	lastLine := ""
-	for scanner.Scan() {
-		lastLine := scanner.Text()
-		out := &dockerOutStream{}
-		if err := json.Unmarshal([]byte(lastLine), out); err != nil {
-			opLogger.Warn("Docker build output not a stream line, skipping", "reason", err)
-			continue
-		}
-		opLogger.Info("docker image build status", "stream", strings.TrimSpace(out.Stream))
-	}
-
-	// deal with failed builds:
-	errLine := &dockerErrorLine{}
-	json.Unmarshal([]byte(lastLine), errLine)
-	if errLine.Error != "" {
-		opLogger.Error("Docker image build finished with error", "reason", errLine.Error)
-		return fmt.Errorf(errLine.Error)
-	}
-
-	if scannerErr := scanner.Err(); scannerErr != nil {
-		opLogger.Error("Docker response scanner finished with error", "reason", scannerErr)
-		return scannerErr
-	}
-
-	// all okay:
-	return nil
+	return processDockerOutput(opLogger, buildResponse.Body, dockerReaderStream())
 }
 
 // ImageExportStageDependentResources exports resources from a given Docker image indicated by tag.
@@ -369,16 +344,14 @@ func ImageExportStageDependentResources(ctx context.Context, client *docker.Clie
 		return resolvedResources, err
 	}
 
-	reader, err := client.ImageSave(ctx, []string{imageID})
+	dockerFsReader, cleanupFunc, err := getImageReader(ctx, client, imageID)
 	if err != nil {
 		opLogger.Error("failed creating io.Reader for image save", "reason", err)
 		return resolvedResources, err
 	}
-	defer reader.Close()
+	defer cleanupFunc()
 
 	opLogger.Debug("reading Docker image data")
-
-	dockerFsReader := tar.NewReader(reader)
 
 	for {
 
@@ -498,6 +471,18 @@ func ImageExportStageDependentResources(ctx context.Context, client *docker.Clie
 	return resolvedResources, nil
 }
 
+// ImagePull pulls a Docker image.
+func ImagePull(ctx context.Context, client *docker.Client, logger hclog.Logger, refStr string) error {
+	response, err := client.ImagePull(ctx, refStr, types.ImagePullOptions{All: false})
+	if err != nil {
+		return err
+	}
+	if err := processDockerOutput(logger.Named("image-pull"), response, dockerReaderStatus()); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ImageRemove removes the Docker image using the tag name.
 func ImageRemove(ctx context.Context, client *docker.Client, logger hclog.Logger, tagName string) error {
 	opLogger := logger.With("tag-name", tagName)
@@ -521,6 +506,81 @@ func ImageRemove(ctx context.Context, client *docker.Client, logger hclog.Logger
 			"untagged", response.Untagged)
 	}
 	return nil
+}
+
+func ReadImageConfig(ctx context.Context, client *docker.Client, opLogger hclog.Logger, tagName string) (*DockerImageMetadata, error) {
+
+	imageID, err := FindImageIDByTag(ctx, client, tagName)
+	if err != nil {
+		opLogger.Error("failed fetching Docker image ID by tag", "reason", err)
+		return nil, err
+	}
+
+	opLogger = opLogger.With("image-id", imageID)
+
+	dockerFsReader, cleanupFunc, err := getImageReader(ctx, client, imageID)
+	if err != nil {
+		opLogger.Error("failed creating io.Reader for image save", "reason", err)
+		return nil, err
+	}
+	defer cleanupFunc()
+
+	jsonEntries := map[string]string{}
+
+	for {
+		dockerFsHeader, dockerFsError := dockerFsReader.Next()
+		if dockerFsError != nil {
+			if dockerFsError == io.EOF {
+				break
+			}
+			opLogger.Error("error while reading exported Docker file system", "reason", dockerFsError)
+			return nil, dockerFsError
+		}
+
+		// only interested in json files in the top directory:
+		if strings.HasSuffix(dockerFsHeader.Name, ".json") {
+			fullBuffer := bytes.NewBuffer([]byte{})
+			targetBuf := make([]byte, 512*1024)
+			for {
+				read, e := dockerFsReader.Read(targetBuf)
+				if read == 0 && e == io.EOF {
+					break
+				}
+				// write chunk to file:
+				fullBuffer.Grow(read)
+				fullBuffer.Write(targetBuf[0:read])
+			}
+			jsonEntries[dockerFsHeader.Name] = fullBuffer.String()
+		}
+	}
+
+	response := &DockerImageMetadata{}
+
+	if manifests, ok := jsonEntries["manifest.json"]; !ok {
+		return nil, fmt.Errorf("no manifest.json")
+	} else {
+		output := []*DockerImageManifest{}
+		if err := json.NewDecoder(bytes.NewBufferString(manifests)).Decode(&output); err != nil {
+			return nil, errors.Wrap(err, "failed deserializing manifest.json")
+		}
+		if len(output) == 0 {
+			return nil, fmt.Errorf("manifest.json without manifests, invalid image?")
+		}
+		response.Manifest = output[0]
+	}
+
+	if imageConfig, ok := jsonEntries[response.Manifest.Config]; !ok {
+		return nil, fmt.Errorf("manifest.json declared %q as config but config not found in image", response.Manifest.Config)
+	} else {
+		output := &DockerImageConfig{}
+		if err := json.NewDecoder(bytes.NewBufferString(imageConfig)).Decode(&output); err != nil {
+			return nil, errors.Wrapf(err, "failed deserializing config %q", response.Manifest.Config)
+		}
+		response.Config = output
+	}
+
+	return response, nil
+
 }
 
 func removeContainer(ctx context.Context, client *docker.Client, opLogger hclog.Logger, containerID string) {
@@ -564,17 +624,10 @@ func stopContainer(ctx context.Context, client *docker.Client, opLogger hclog.Lo
 	}
 }
 
-// -- docker output related types:
-
-type dockerOutStream struct {
-	Stream string `json:"stream"`
-}
-
-type dockerErrorLine struct {
-	Error       string            `json:"error"`
-	ErrorDetail dockerErrorDetail `json:"errorDetail"`
-}
-
-type dockerErrorDetail struct {
-	Message string `json:"message"`
+func getImageReader(ctx context.Context, client *docker.Client, imageID string) (*tar.Reader, func(), error) {
+	reader, err := client.ImageSave(ctx, []string{imageID})
+	if err != nil {
+		return nil, nil, err
+	}
+	return tar.NewReader(reader), func() { reader.Close() }, nil
 }
