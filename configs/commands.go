@@ -101,17 +101,24 @@ func (c *InspectCommandConfig) Validate() error {
 type RootfsCommandConfig struct {
 	flagBase
 
-	BuildArgs         map[string]string
-	Dockerfile        string
-	DockerfileStage   string
-	PostBuildCommands []string
-	PreBuildCommands  []string
-	Tag               string
-
 	BootstrapCertsKeySize                int
 	BootstrapCertsValidity               time.Duration
 	BootstrapInitialCommunicationTimeout time.Duration
 	BootstrapServerBindInterface         string
+
+	// Dockerfile build:
+	BuildArgs       map[string]string
+	Dockerfile      string
+	DockerfileStage string
+
+	// Docker image build:
+	DockerImage     string
+	DockerImageBase string
+
+	// Shared settings:
+	PostBuildCommands []string
+	PreBuildCommands  []string
+	Tag               string
 }
 
 // NewRootfsCommandConfig returns new command configuration.
@@ -122,19 +129,36 @@ func NewRootfsCommandConfig() *RootfsCommandConfig {
 // FlagSet returns an instance of the flag set for the configuration.
 func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
-		c.flagSet.StringToStringVar(&c.BuildArgs, "build-arg", map[string]string{}, "Build arguments, Multiple OK")
-		c.flagSet.StringVar(&c.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
-		c.flagSet.StringVar(&c.DockerfileStage, "dockerfile-stage", "", "The Dockerfile stage name to build from")
-		c.flagSet.StringArrayVar(&c.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
-		c.flagSet.StringArrayVar(&c.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
-		c.flagSet.StringVar(&c.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
-
 		c.flagSet.IntVar(&c.BootstrapCertsKeySize, "bootstrap-certs-key-size", 2048, "Embedded CA bootstrap certificates key size, recommended values: 2048 or 4096")
 		c.flagSet.DurationVar(&c.BootstrapCertsValidity, "bootstrap-certs-validity", time.Minute*5, "The period for which the embedded bootstrap certificates are valid for")
 		c.flagSet.DurationVar(&c.BootstrapInitialCommunicationTimeout, "bootstrap-initial-communication-timeout", time.Second*30, "Howlong to wait for vminit to initiate bootstrap with commands request before considering bootstrap failed")
 		c.flagSet.StringVar(&c.BootstrapServerBindInterface, "bootstrap-server-bind-interface", "eno1", "The interface to bind the bootstrap server on")
+		// Dockerfile build:
+		c.flagSet.StringToStringVar(&c.BuildArgs, "build-arg", map[string]string{}, "Build arguments, Multiple OK")
+		c.flagSet.StringVar(&c.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")
+		c.flagSet.StringVar(&c.DockerfileStage, "dockerfile-stage", "", "The Dockerfile stage name to build from")
+		// Docker image build:
+		c.flagSet.StringVar(&c.DockerImage, "docker-image", "", "Docker image tag name to build from; mutually exclusive with --dockerfile")
+		c.flagSet.StringVar(&c.DockerImageBase, "docker-image-base", "", "Rootfs base when building from Docker image, required because the base operating system can't be established from a Docker image; for example alpine:3.13")
+		// Shared settings:
+		c.flagSet.StringArrayVar(&c.PostBuildCommands, "post-build-command", []string{}, "OS specific commands to run after Dockerfile commands but before the file system is persisted, multiple OK")
+		c.flagSet.StringArrayVar(&c.PreBuildCommands, "pre-build-command", []string{}, "OS specific commands to run before any Dockerfile command, multiple OK")
+		c.flagSet.StringVar(&c.Tag, "tag", "", "Tag name of the build, required; must be org/name:version")
 	}
 	return c.flagSet
+}
+
+// Validate validates the correctness of the configuration.
+func (c *RootfsCommandConfig) Validate() error {
+	if c.Dockerfile != "" && c.DockerImage != "" {
+		return fmt.Errorf("--dockerfile and --docker-image are mutually exclusive")
+	}
+	if c.DockerImage != "" {
+		if c.DockerImageBase == "" {
+			return fmt.Errorf("--docker-image-base is required when using --docker-image")
+		}
+	}
+	return nil
 }
 
 // RunCommandConfig is the run command configuration.

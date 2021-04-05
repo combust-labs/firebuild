@@ -31,7 +31,7 @@ func TestDockerImagePull(t *testing.T) {
 
 }
 
-func TestDockerfileFromHistory(t *testing.T) {
+func TestDockerfileFromHistoryWithResourceExport(t *testing.T) {
 
 	expectedLines := []string{
 		"FROM alpine:3.13",

@@ -98,12 +98,11 @@ func (b *defaultBuild) CreateContext(dependencies rootfs.Resources) (*rootfs.Wor
 	patternMatcherFunc := func(input string) bool {
 		pathMatched, matchErr := patternMatcher.Matches(input)
 		if matchErr != nil {
-			b.logger.Warn("error while matching path for PutResource ADD, skipping", "source", input, "reason", matchErr)
+			b.logger.Warn("error while matching path for PutResource ADD/COPY, skipping", "source", input, "reason", matchErr)
 			return false // skip this resource
 		}
 		if !pathMatched {
-			// file to be excluded
-			b.logger.Debug("skipping excluded path for PutResource ADD", "source", input)
+			// not matched by exclusions, is to be included
 			return false
 		}
 		return true
@@ -113,6 +112,7 @@ func (b *defaultBuild) CreateContext(dependencies rootfs.Resources) (*rootfs.Wor
 		switch tcommand := command.(type) {
 		case commands.Add:
 			if patternMatcherFunc(tcommand.Source) {
+				b.logger.Debug("skipping excluded path for PutResource ADD", "source", tcommand.Source)
 				continue
 			}
 			if _ /* resource */, ok := ctx.ResourcesResolved[tcommand.Source]; ok {
@@ -123,6 +123,7 @@ func (b *defaultBuild) CreateContext(dependencies rootfs.Resources) (*rootfs.Wor
 			}
 		case commands.Copy:
 			if patternMatcherFunc(tcommand.Source) {
+				b.logger.Debug("skipping excluded path for PutResource COPY", "source", tcommand.Source)
 				continue
 			}
 			// dependency resources exist for COPY commands only:
