@@ -33,15 +33,15 @@ type JailingFirecrackerConfig struct {
 	ProfileInheriting `json:"-"`
 	ValidatingConfig  `json:"-"`
 
-	BinaryFirecracker string `json:"binary-firecracker" mapstructure:"binary-firecracker"`
-	BinaryJailer      string `json:"binary-jailer" mapstructure:"binary-jailer"`
-	ChrootBase        string `json:"chroot-base" mapstructure:"chroot-base"`
+	BinaryFirecracker string `json:"BinaryFirecracker" mapstructure:"BinaryFirecracker"`
+	BinaryJailer      string `json:"BinaryJailer" mapstructure:"BinaryJailer"`
+	ChrootBase        string `json:"ChrootBase" mapstructure:"ChrootBase"`
 
-	JailerGID      int `json:"jailer-gid" mapstructure:"jailer-gid"`
-	JailerNumeNode int `json:"jailer-numa-node" mapstructure:"jailer-numa-node"`
-	JailerUID      int `json:"jailer-uid" mapstructure:"jailer-uid"`
+	JailerGID      int `json:"JailerGid" mapstructure:"JailerGid"`
+	JailerNumeNode int `json:"JailerNumaNode" mapstructure:"JailerNumaNode"`
+	JailerUID      int `json:"JailerUid" mapstructure:"JailerUid"`
 
-	NetNS string `json:"netns" mapstructure:"netns"`
+	NetNS string `json:"NetNS" mapstructure:"NetNS"`
 
 	vmmID string
 }

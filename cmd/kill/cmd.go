@@ -230,7 +230,7 @@ func processCommand() int {
 	rootLogger.Info("cleaning up CNI")
 	if err := cni.CleanupCNI(rootLogger,
 		vmmMetadata.Configs.CNI,
-		commandConfig.VMMID, vmmMetadata.CNI.VethIfaceName,
+		commandConfig.VMMID, vmmMetadata.CNI.VethName,
 		vmmMetadata.CNI.NetName, vmmMetadata.CNI.NetNS); err != nil {
 		rootLogger.Error("failed cleaning up CNI", "reason", err)
 		spanKillCNI.SetBaggageItem("error", err.Error())

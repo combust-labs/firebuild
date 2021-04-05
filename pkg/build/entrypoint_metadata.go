@@ -6,6 +6,6 @@ import "github.com/combust-labs/firebuild-shared/build/commands"
 // Returned by the rootfs builder after parsing the Docker source.
 // Used primarily for metadata.
 type EntrypointInfo struct {
-	Cmd        commands.Cmd        `json:"cmd" mapstructure:"cmd"`
-	Entrypoint commands.Entrypoint `json:"entrypoint" mapstructure:"entrypoint"`
+	Cmd        commands.Cmd        `json:"Cmd" mapstructure:"Cmd"`
+	Entrypoint commands.Entrypoint `json:"Entrypoint" mapstructure:"Entrypoint"`
 }

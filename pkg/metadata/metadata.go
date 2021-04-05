@@ -26,68 +26,70 @@ const (
 
 // MDBaseOS is the base OS metadata.
 type MDBaseOS struct {
-	CreatedAtUTC int64             `json:"created-at-utc" mapstructure:"created-at-utc"`
-	Image        MDImage           `json:"image" mapstructure:"image"`
-	Labels       map[string]string `json:"labels" mapstructure:"labels"`
-	Type         Type              `json:"type" mapstructure:"type"`
+	CreatedAtUTC int64             `json:"CreatedAtUTC" mapstructure:"CreatedAtUTC"`
+	Image        MDImage           `json:"Image" mapstructure:"Image"`
+	Labels       map[string]string `json:"Labels" mapstructure:"Labels"`
+	Type         Type              `json:"Type" mapstructure:"Type"`
 }
 
 // MDImage is the image.
 type MDImage struct {
-	Org     string `json:"org" mapstructure:"org"`
-	Image   string `json:"image" mapstructure:"image"`
-	Version string `json:"version" mapstructure:"version"`
+	Org     string `json:"Org" mapstructure:"Org"`
+	Image   string `json:"Image" mapstructure:"Image"`
+	Version string `json:"Version" mapstructure:"Version"`
 }
 
 // MDNetIPConfiguration is the IP configuration of a running VMM.
 type MDNetIPConfiguration struct {
-	Gateway     string   `json:"gateway" mapstructure:"gateway"`
-	IfName      string   `json:"ifname" mapstructure:"ifname"`
-	IP          string   `json:"ip" mapstructure:"ip"`
-	IPAddr      string   `json:"ip-addr" mapstructure:"ip-addr"`
-	IPMask      string   `json:"ip-mask" mapstructure:"ip-mask"`
-	IPNet       string   `json:"ip-net" mapstructure:"ip-net"`
-	Nameservers []string `json:"nameservers" mapstructure:"nameservers"`
+	Gateway     string   `json:"Gateway" mapstructure:"Gateway"`
+	IfName      string   `json:"IfName" mapstructure:"IfName"`
+	IP          string   `json:"IP" mapstructure:"IP"`
+	IPAddr      string   `json:"IPAddr" mapstructure:"IPAddr"`
+	IPMask      string   `json:"IPMask" mapstructure:"IPMask"`
+	IPNet       string   `json:"IPNet" mapstructure:"IPNet"`
+	Nameservers []string `json:"NameServers" mapstructure:"NameServers"`
 }
 
 // MDNetStaticConfiguration is the static network configuration of a running VMM.
 type MDNetStaticConfiguration struct {
-	MacAddress string `json:"mac-address" mapstructure:"mac-address"`
+	MacAddress string `json:"MacAddress" mapstructure:"MacAddress"`
 	// HostDevName is the name of the tap device the VM will use
-	HostDevName string `json:"host-dev-name" mapstructure:"host-dev-name"`
+	HostDeviceName string `json:"HostDeviceName" mapstructure:"HostDeviceName"`
 	// IPConfiguration (optional) allows a static IP, gateway and up to 2 DNS nameservers
 	// to be automatically configured within the VM upon startup.
-	IPConfiguration *MDNetIPConfiguration `json:"ip-configuration" mapstructure:"ip-configuration"`
+	IPConfiguration *MDNetIPConfiguration `json:"IPConfiguration" mapstructure:"IPConfiguration"`
 }
 
 // MDNetworkInterafce is network interface configuration of a running VMM.
 type MDNetworkInterafce struct {
-	AllowMMDS           bool                      `json:"allow-mmds" mapstructure:"allow-mmds"`
-	InRateLimiter       *models.RateLimiter       `json:"in-rate-limiter" mapstructure:"in-rate-limiter"`
-	OutRateLimiter      *models.RateLimiter       `json:"out-rate-limiter" mapstructure:"out-rate-limiter"`
-	StaticConfiguration *MDNetStaticConfiguration `json:"static-configuration" mapstructure:"static-configuration"`
+	AllowMMDS           bool                      `json:"AllowMMDS" mapstructure:"AllowMMDS"`
+	InRateLimiter       *models.RateLimiter       `json:"InRateLimiter" mapstructure:"InRateLimiter"`
+	OutRateLimiter      *models.RateLimiter       `json:"OutRateLimiter" mapstructure:"OutRateLimiter"`
+	StaticConfiguration *MDNetStaticConfiguration `json:"StaticConfiguration" mapstructure:"StaticConfiguration"`
 }
 
 // MDRootfsConfig represents the rootfs build configuration.
 type MDRootfsConfig struct {
-	BuildArgs         map[string]string `json:"build-args" mapstructure:"build-args"`
-	Dockerfile        string            `json:"dockerfile" mapstructure:"dockerfile"`
-	PreBuildCommands  []string          `json:"pre-build-commands" mapstructure:"pre-build-commands"`
-	PostBuildCommands []string          `json:"post-build-commands" mapstructure:"post-build-commands"`
+	BuildArgs         map[string]string `json:"BuildArgs" mapstructure:"BuildArgs"`
+	Dockerfile        string            `json:"Dockerfile" mapstructure:"Dockerfile"`
+	DockerImage       string            `json:"DockerImage" mapstructure:"DockerImage"`
+	DockerImageBase   string            `json:"DockerImageBase" mapstructure:"DockerImageBase"`
+	PreBuildCommands  []string          `json:"PreBuildCommands" mapstructure:"PreBuildCommands"`
+	PostBuildCommands []string          `json:"PostBuildCommands" mapstructure:"PostBuildCommands"`
 }
 
 // MDRootfs represents a metadata of the rootfs.
 type MDRootfs struct {
-	BuildConfig    MDRootfsConfig                 `json:"build-config" mapstructure:"build-config"`
-	CreatedAtUTC   int64                          `json:"created-at-utc" mapstructure:"created-at-utc"`
-	EntrypointInfo *mmds.MMDSRootfsEntrypointInfo `json:"entrypoint-info" mapstructure:"entrypoint-info"`
-	Image          MDImage                        `json:"image" mapstructure:"image"`
-	Labels         map[string]string              `json:"labels" mapstructure:"labels"`
-	Parent         interface{}                    `json:"parent" mapstructure:"parent"`
-	Ports          []string                       `json:"ports" mapstructure:"ports"`
-	Tag            string                         `json:"tag" mapstructure:"tag"`
-	Type           Type                           `json:"type" mapstructure:"type"`
-	Volumes        []string                       `json:"volumes" mapstructure:"volumes"`
+	BuildConfig    MDRootfsConfig                 `json:"BuildConfig" mapstructure:"BuildConfig"`
+	CreatedAtUTC   int64                          `json:"CreatedAtUTC" mapstructure:"CreatedAtUTC"`
+	EntrypointInfo *mmds.MMDSRootfsEntrypointInfo `json:"EntrypointInfo" mapstructure:"EntrypointInfo"`
+	Image          MDImage                        `json:"Image" mapstructure:"Image"`
+	Labels         map[string]string              `json:"Labels" mapstructure:"Labels"`
+	Parent         interface{}                    `json:"Parent" mapstructure:"Parent"`
+	Ports          []string                       `json:"Ports" mapstructure:"Ports"`
+	Tag            string                         `json:"Tag" mapstructure:"Tag"`
+	Type           Type                           `json:"Type" mapstructure:"Type"`
+	Volumes        []string                       `json:"Volumes" mapstructure:"Volumes"`
 }
 
 // MDRootfsFromInterface unwraps an interface{} as *MDRootfs.
@@ -101,33 +103,33 @@ func MDRootfsFromInterface(input interface{}) (*MDRootfs, error) {
 
 // MDRunConfigs contains the configuration of the running VMM.
 type MDRunConfigs struct {
-	CNI       *configs.CNIConfig                `json:"cni" mapstructure:"cni"`
-	Jailer    *configs.JailingFirecrackerConfig `json:"jailer" mapstructure:"jailer"`
-	Machine   *configs.MachineConfig            `json:"machine" mapstructure:"machine"`
-	RunConfig *configs.RunCommandConfig         `json:"run-config" mapstructure:"run-config"`
+	CNI       *configs.CNIConfig                `json:"CNI" mapstructure:"CNI"`
+	Jailer    *configs.JailingFirecrackerConfig `json:"Jailer" mapstructure:"Jailer"`
+	Machine   *configs.MachineConfig            `json:"Machine" mapstructure:"Machine"`
+	RunConfig *configs.RunCommandConfig         `json:"RunConfig" mapstructure:"RunConfig"`
 }
 
 // MDRunCNI represents the CNI metadata of a running VMM.
 // This metadata is stored in the VMM run cache directory.
 type MDRunCNI struct {
-	VethIfaceName string `json:"veth-iface-name" mapstructure:"veth-iface-name"`
-	NetName       string `json:"net-name" mapstructure:"net-name"`
-	NetNS         string `json:"net-ns" mapstructure:"net-ns"`
+	VethName string `json:"VethName" mapstructure:"VethName"`
+	NetName  string `json:"NetName" mapstructure:"NetName"`
+	NetNS    string `json:"NetNS" mapstructure:"NetNS"`
 }
 
 // MDRun contains the runtime information about a VMM.
 type MDRun struct {
-	Bootstrap         *mmds.MMDSBootstrap  `json:"bootstrap,omitempty" mapstructure:"bootstrap,omitempty"`
-	CNI               MDRunCNI             `json:"cni" mapstructure:"cni"`
-	Configs           MDRunConfigs         `json:"configs" mapstructure:"configs"`
-	Drives            []models.Drive       `json:"drivers" mapstructure:"drives"`
-	NetworkInterfaces []MDNetworkInterafce `json:"network-interfaces" mapstructure:"network-interfaces"`
-	PID               pid.RunningVMMPID    `json:"pid" mapstructure:"pid"`
-	Rootfs            *MDRootfs            `json:"rootfs" mapstructure:"rootfs"`
-	RunCache          string               `json:"run-cache" mapstructure:"run-cache"`
-	StartedAtUTC      int64                `json:"started-at-utc" mapstructure:"started-at-utc"`
-	VMMID             string               `json:"vmm-id" mapstructure:"vmm-id"`
-	Type              Type                 `json:"type" mapstructure:"type"`
+	Bootstrap         *mmds.MMDSBootstrap  `json:"Bootstrap,omitempty" mapstructure:"Bootstrap,omitempty"`
+	CNI               MDRunCNI             `json:"CNI" mapstructure:"CNI"`
+	Configs           MDRunConfigs         `json:"Configs" mapstructure:"Configs"`
+	Drives            []models.Drive       `json:"Drivers" mapstructure:"Drives"`
+	NetworkInterfaces []MDNetworkInterafce `json:"NetworkInterfaces" mapstructure:"NetworkInterfaces"`
+	PID               pid.RunningVMMPID    `json:"Pid" mapstructure:"Pid"`
+	Rootfs            *MDRootfs            `json:"Rootfs" mapstructure:"Rootfs"`
+	RunCache          string               `json:"RunCache" mapstructure:"RunCache"`
+	StartedAtUTC      int64                `json:"StartedAtUTC" mapstructure:"StartedAtUTC"`
+	VMMID             string               `json:"VMMID" mapstructure:"VMMID"`
+	Type              Type                 `json:"Type" mapstructure:"Type"`
 }
 
 // AsMMDS converts the run metadata to MMDS metadata.
@@ -182,7 +184,7 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 						result := map[string]*mmds.MMDSNetworkInterface{}
 						for _, nic := range r.NetworkInterfaces {
 							result[nic.StaticConfiguration.MacAddress] = &mmds.MMDSNetworkInterface{
-								HostDeviceName: nic.StaticConfiguration.HostDevName,
+								HostDeviceName: nic.StaticConfiguration.HostDeviceName,
 								Gateway:        nic.StaticConfiguration.IPConfiguration.Gateway,
 								IfName:         nic.StaticConfiguration.IPConfiguration.IfName,
 								IP:             nic.StaticConfiguration.IPConfiguration.IP,
@@ -261,7 +263,7 @@ func fcStaticConfiguration(sc *firecracker.StaticNetworkConfiguration) *MDNetSta
 	}
 	return &MDNetStaticConfiguration{
 		MacAddress:      sc.MacAddress,
-		HostDevName:     sc.HostDevName,
+		HostDeviceName:  sc.HostDevName,
 		IPConfiguration: fcIPConfiguration(sc.IPConfiguration),
 	}
 }

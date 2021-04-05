@@ -10,7 +10,7 @@ import (
 
 // RunningVMMPID represents a running VMM pid information.
 type RunningVMMPID struct {
-	Pid int `json:"pid"`
+	Pid int `json:"Pid"`
 }
 
 // IsRunning checks if the process identified by the PID is still running.

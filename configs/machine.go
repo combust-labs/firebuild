@@ -8,22 +8,19 @@ import (
 type MachineConfig struct {
 	flagBase
 
-	CNINetworkName        string `json:"cni-network-name" mapstructure:"cni-network-name"`
-	CPU                   int64  `json:"cpu" mapstructure:"cpu"`
-	CPUTemplate           string `json:"cpu-template" mapstructure:"cpu-template"`
-	HTEnabled             bool   `json:"ht-enabled" mapstructure:"ht-enabled"`
-	KernelArgs            string `json:"kernel-args" mapstructure:"kernel-args"`
-	Mem                   int64  `json:"mem" mapstructure:"mem"`
-	NoMMDS                bool   `json:"no-mmds" mapstructure:"no-mmds"`
-	RootDrivePartUUID     string `json:"root-drive-partuuid" mapstructure:"root-drive-partuuid"`
-	SSHEnableAgentForward bool   `json:"ssh-enable-agent-forward" mapstructure:"ssh-enable-agent-forward"`
-	SSHPort               int    `json:"ssh-port" mapstructure:"ssh-port"`
-	SSHUser               string `json:"ssh-user" mapstructure:"ssh-user"`
-	SSHAuthorizedKeysFile string `json:"ssh-authorized-keys-file" mapstructure:"ssh-authorized-keys-file"`
-	VMLinuxID             string `json:"vmlinux" mapstructure:"vmlinux"`
+	CNINetworkName    string `json:"CniNetworkName" mapstructure:"CniNetworkName"`
+	CPU               int64  `json:"CPU" mapstructure:"CPU"`
+	CPUTemplate       string `json:"CPUTemplate" mapstructure:"CPUTemplate"`
+	HTEnabled         bool   `json:"HTEnabled" mapstructure:"HTEnabled"`
+	KernelArgs        string `json:"KernelArgs" mapstructure:"KernelArgs"`
+	Mem               int64  `json:"Mem" mapstructure:"Mem"`
+	NoMMDS            bool   `json:"NoMMDS" mapstructure:"NoMMDS"` // TODO: remove
+	RootDrivePartUUID string `json:"RootDrivePartuuid" mapstructure:"RootDrivePartuuid"`
+	SSHUser           string `json:"SSHUser" mapstructure:"SSHUser"`
+	VMLinuxID         string `json:"VMLinux" mapstructure:"VMLinux"`
 
-	LogFcHTTPCalls                 bool `json:"log-firecracker-http-calls" mapstructure:"log-firecracker-http-calls"`
-	ShutdownGracefulTimeoutSeconds int  `json:"shutdown-graceful-timeout-seconds" mapstructure:"shutdown-graceful-timeout-seconds"`
+	LogFcHTTPCalls                 bool `json:"LogFirecrackerHTTPCalls" mapstructure:"LogFirecrackerHTTPCalls"`
+	ShutdownGracefulTimeoutSeconds int  `json:"ShutdownGracefulTimeoutSeconds" mapstructure:"ShutdownGracefulTimeoutSeconds"`
 
 	daemonize      bool
 	kernelOverride string
@@ -49,9 +46,6 @@ func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.Int64Var(&c.Mem, "mem", 128, "Amount of memory for the VMM")
 		c.flagSet.BoolVar(&c.NoMMDS, "no-mmds", false, "If set, disables MMDS")
 		c.flagSet.StringVar(&c.RootDrivePartUUID, "root-drive-partuuid", "", "Root drive part UUID")
-		c.flagSet.BoolVar(&c.SSHEnableAgentForward, "ssh-enable-agent-forward", false, "If set, enables SSH agent forward")
-		c.flagSet.StringVar(&c.SSHAuthorizedKeysFile, "ssh-authorized-keys-file", "", "SSH authorized keys file in the machine root file system; if empty, /home/{ssh-user}/.ssh/authorized_keys is asumed")
-		c.flagSet.IntVar(&c.SSHPort, "ssh-port", 22, "SSH port")
 		c.flagSet.StringVar(&c.SSHUser, "ssh-user", "", "SSH user")
 		c.flagSet.StringVar(&c.VMLinuxID, "vmlinux-id", "", "Kernel ID / name")
 

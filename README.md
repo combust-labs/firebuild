@@ -231,6 +231,22 @@ sudo $GOPATH/bin/firebuild rootfs \
 
 The `--docker-image-base` is required because the underlying operating system the image was built from cannot be established from the Docker manifest.
 
+To access the Jaeger Query UI via the host:
+
+```
+sudo iptables -t filter -A FORWARD \
+    -m comment --comment "jaeger:1.22" \
+    -p tcp -d 192.168.127.100 --dport 16686 \
+    -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -t nat -A PREROUTING \
+    -m comment --comment "jaeger:1.22" \
+    -p tcp -i eno1 --dport 16686 \
+    -j DNAT \
+    --to-destination 192.168.127.100:16686
+```
+
+Where the exact IP address can be obtained using the `firebuild inspect --profile=... --vmm-id=...` command.
+
 ### how does it work
 
 The builder pulls the requested Docker image with Docker. It then open the Docker image via the Docker `save` command and looks up the `manifest.json` and the Docker image config `json` explicitly stated in the manifest. When config is fetched, a temporary Dockerfile is built from the Docker config history. Any `ADD` and `COPY` commands for resources other than first `/` are used to extract files from the saved source image. When resources are exported, the build further continues exactly the same way as in case of the `Dockerfile` build.

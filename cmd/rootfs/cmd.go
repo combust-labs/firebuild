@@ -690,6 +690,8 @@ func processCommand() int {
 			BuildConfig: metadata.MDRootfsConfig{
 				BuildArgs:         commandConfig.BuildArgs,
 				Dockerfile:        commandConfig.Dockerfile,
+				DockerImage:       commandConfig.DockerImage,
+				DockerImageBase:   commandConfig.DockerImageBase,
 				PreBuildCommands:  commandConfig.PreBuildCommands,
 				PostBuildCommands: commandConfig.PostBuildCommands,
 			},

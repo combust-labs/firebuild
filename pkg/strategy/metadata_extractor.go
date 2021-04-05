@@ -33,9 +33,9 @@ func NewMetadataExtractorHandler(logger hclog.Logger, md *metadata.MDRun) firecr
 
 			if cniIface != nil {
 				md.CNI = metadata.MDRunCNI{
-					NetName:       cniIface.CNIConfiguration.NetworkName,
-					NetNS:         m.Cfg.NetNS,
-					VethIfaceName: cniIface.CNIConfiguration.IfName,
+					NetName:  cniIface.CNIConfiguration.NetworkName,
+					NetNS:    m.Cfg.NetNS,
+					VethName: cniIface.CNIConfiguration.IfName,
 				}
 				setMetadata = cniIface.AllowMMDS
 			}

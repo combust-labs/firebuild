@@ -8,9 +8,9 @@ import (
 type CNIConfig struct {
 	flagBase
 
-	BinDir   string `json:"bin-dir" mapstructure:"bin-dir"`
-	ConfDir  string `json:"conf-dir" mapstructure:"conf-dir"`
-	CacheDir string `json:"cache-dir" mapstructure:"cache-dir"`
+	BinDir   string `json:"BinDir" mapstructure:"BinDir"`
+	ConfDir  string `json:"ConfDir" mapstructure:"ConfDir"`
+	CacheDir string `json:"CacheDir" mapstructure:"CacheDir"`
 }
 
 // NewCNIConfig returns a new instance of the configuration.
