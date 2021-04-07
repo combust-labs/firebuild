@@ -132,7 +132,7 @@ func (c *RootfsCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.IntVar(&c.BootstrapCertsKeySize, "bootstrap-certs-key-size", 2048, "Embedded CA bootstrap certificates key size, recommended values: 2048 or 4096")
 		c.flagSet.DurationVar(&c.BootstrapCertsValidity, "bootstrap-certs-validity", time.Minute*5, "The period for which the embedded bootstrap certificates are valid for")
 		c.flagSet.DurationVar(&c.BootstrapInitialCommunicationTimeout, "bootstrap-initial-communication-timeout", time.Second*30, "Howlong to wait for vminit to initiate bootstrap with commands request before considering bootstrap failed")
-		c.flagSet.StringVar(&c.BootstrapServerBindInterface, "bootstrap-server-bind-interface", "eno1", "The interface to bind the bootstrap server on")
+		c.flagSet.StringVar(&c.BootstrapServerBindInterface, "bootstrap-server-bind-interface", "", "The interface to bind the bootstrap server on; if empty, a list of up broadcast up will be resolved and the first interface will be used")
 		// Dockerfile build:
 		c.flagSet.StringToStringVar(&c.BuildArgs, "build-arg", map[string]string{}, "Build arguments, Multiple OK")
 		c.flagSet.StringVar(&c.Dockerfile, "dockerfile", "", "Local or remote (HTTP / HTTP) path; if the Dockerfile uses ADD or COPY commands, it's recommended to use a local file")

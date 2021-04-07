@@ -460,13 +460,26 @@ func processCommand() int {
 
 	spanRootfsServerStart := tracer.StartSpan("rootfs-server-start", opentracing.ChildOf(spanServerTLSConfig.Context()))
 
-	ifaceIP, ifaceIPErr := utils.GetInterfaceV4Addr(commandConfig.BootstrapServerBindInterface)
+	interfaceName, interfaceErr := utils.GetConfiguredOrSuitableInterfaceName(commandConfig.BootstrapServerBindInterface)
+	if interfaceErr != nil {
+		// this error happens only when no interface name was configured:
+		rootLogger.Error("failed fetching the interface to bootstrap on, configure the interface via command flags", "reason", interfaceErr)
+		spanRootfsServerStart.SetBaggageItem("error", interfaceErr.Error())
+		spanRootfsServerStart.Finish()
+		return 1
+	}
+
+	rootLogger.Info("fetching a suitable IPv4 address to bind the bootstrap on", "interface", interfaceName)
+
+	ifaceIP, ifaceIPErr := utils.GetInterfaceV4Addr(interfaceName)
 	if ifaceIPErr != nil {
 		rootLogger.Error("failed fetching IP address of the configured interface", "reason", ifaceIPErr)
 		spanRootfsServerStart.SetBaggageItem("error", ifaceIPErr.Error())
 		spanRootfsServerStart.Finish()
 		return 1
 	}
+
+	rootLogger.Info("IPv4 address to bind the bootstrap on was found", interfaceName, ifaceIP)
 
 	rootfsServerConfig := &rootfs.GRPCServiceConfig{
 		BindHostPort:    fmt.Sprintf("%s:0", ifaceIP),
@@ -486,7 +499,7 @@ func processCommand() int {
 		cleanup.Add(func() {
 			rootfsServer.Stop()
 		})
-		rootLogger.Info("Build server started and serving on", rootfsServerConfig.BindHostPort)
+		rootLogger.Info("build server started and serving", "host-port", rootfsServerConfig.BindHostPort)
 	}
 
 	spanRootfsServerStart.Finish()
