@@ -3,6 +3,7 @@ package configs
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -172,6 +173,7 @@ type RunCommandConfig struct {
 	From          string
 	IdentityFiles []string
 	Hostname      string
+	Name          string
 }
 
 // NewRunCommandConfig returns new command configuration.
@@ -188,6 +190,7 @@ func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.From, "from", "", "The image to launch from, for example: tests/postgres:13")
 		c.flagSet.StringArrayVar(&c.IdentityFiles, "identity-file", []string{}, "Full path to the SSH public key to deploy to the machine during bootstrap, must be regular file, multiple OK")
 		c.flagSet.StringVar(&c.Hostname, "hostname", "", "Hostname to apply to the VMM during bootstrap; if empty, a random name will be assigned")
+		c.flagSet.StringVar(&c.Name, "name", "", "Name of the VM, maximum 20 characters; allowed characters: letters, digits, . and -")
 	}
 	return c.flagSet
 }
@@ -234,6 +237,12 @@ func (c *RunCommandConfig) PublicKeys() ([]ssh.PublicKey, error) {
 
 // Validate validates the correctness of the configuration.
 func (c *RunCommandConfig) Validate() error {
+	nameRegex := regexp.MustCompile("^[a-zA-Z0-9]{1,20}$")
+	if c.Name != "" {
+		if !nameRegex.MatchString(c.Name) {
+			return fmt.Errorf("--name is not a valid name")
+		}
+	}
 	for _, envFile := range c.EnvFiles {
 		if _, statErr := utils.CheckIfExistsAndIsRegular(envFile); statErr != nil {
 			return errors.Wrapf(statErr, "environment file '%s' stat error", envFile)
