@@ -1,8 +1,136 @@
-# Build Firecracker VMs from Dockerfiles
+# Convenience of containers, security of virtual machines
 
-A set of tools to build, run and operate Firecracker VMs directly from `Dockerfiles`.
+With firebuild, you can build and deploy secure VMs directly from `Dockerfiles` and Docker images in just few minutes.
 
-## Create a dedicated CNI network for the builds
+The concept of `firebuild` is to leverage as much of the existing Docker world as possible. There are thousands of Docker images out there. Docker images are awesome because they encapsulate the software we want to run in our workloads, they also encapsulate dependencies. Dockerfiles are what Docker images are built from. Dockeriles are the blueprints of the modern infrastructure. There are thousands of them for almost anything one can imagine and new ones are very easy to write.
+
+With firebuild it is possible to:
+
+- build root file systems directly from Dockerfiles
+- tag and version root file systems
+- run and manage microvms on a single host
+- define run profiles
+
+## High level example
+
+Build and start HashiCorp Consul 1.9.4 on Firecracker with three simple steps:
+
+- build a base operating system image
+- build Consul image
+- start the application
+
+```sh
+sudo $GOPATH/bin/firebuild baseos \
+    --profile=standard \
+    --dockerfile $(pwd)/baseos/_/alpine/3.12/Dockerfile
+```
+
+```sh
+sudo $GOPATH/bin/firebuild rootfs \
+    --profile=standard \
+    --dockerfile=git+https://github.com/hashicorp/docker-consul.git:/0.X/Dockerfile \
+    --cni-network-name=machine-builds \
+    --ssh-user=alpine \
+    --vmlinux-id=vmlinux-v5.8 \
+    --tag=combust-labs/consul:1.9.4
+```
+
+```sh
+sudo $GOPATH/bin/firebuild run \
+    --profile=standard \
+    --name=consul1 \
+    --from=combust-labs/consul:1.9.4 \
+    --cni-network-name=machines \
+    --vmlinux-id=vmlinux-v5.8
+```
+
+Find the IP of the `consul1` VM and query Consul:
+
+```sh
+VMIP=$(sudo $GOPATH/bin/firebuild inspect \
+    --profile=standard \
+    --vmm-id=consul1 | jq '.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP' -r)
+```
+
+```sh
+$ curl http://${VMIP}:8500/v1/status/leader
+"127.0.0.1:8300"
+```
+
+## But how?
+
+### clone and build from sources
+
+```sh
+mkdir -p $GOPATH/src/github.com/combust-labs/firebuild
+cd $GOPATH/src/github.com/combust-labs/firebuild
+go install
+```
+
+The binary will be placed in `$GOPATH/bin/firebuild`.
+
+### create a profile
+
+```sh
+# create required directories, these need to exist before the profile can be created:
+sudo mkdir -p /firecracker/rootfs
+sudo mkdir -p /firecracker/vmlinux
+sudo mkdir -p /srv/jailer
+sudo mkdir -p /var/lib/firebuild
+# create a profile:
+sudo $GOPATH/bin/firebuild profile-create \
+	--profile=standard \
+	--binary-firecracker=$(readlink /usr/bin/firecracker) \
+	--binary-jailer=$(readlink /usr/bin/jailer) \
+	--chroot-base=/srv/jailer \
+	--run-cache=/var/lib/firebuild \
+	--storage-provider=directory \
+	--storage-provider-property-string="rootfs-storage-root=/firecracker/rootfs" \
+	--storage-provider-property-string="kernel-storage-root=/firecracker/vmlinux" \
+	--tracing-enable
+```
+
+Kernel images will be stored in `/firecracker/vmlinux`, root file systems will be stored in `/firecracker/rootfs`.
+
+### build the kernel
+
+The examples use the 5.8 Linux kernel image which is built using the configuration from the `baseos/kernel/5.8.config` file in this repository. To build the kernel:
+
+```sh
+export KERNEL_VERSION=v5.8
+mkdir -p /tmp/linux && cd /tmp/linux
+git clone https://github.com/torvalds/linux.git .
+git checkout ${KERNEL_VERSION}
+wget -O .config https://raw.githubusercontent.com/combust-labs/firebuild/master/baseos/kernel/5.8.config
+make vmlinux -j32 # adapt to the number of cores you have
+```
+
+Once built, copy the kernel to the storage:
+
+```sh
+mv /tmp/linux/vmlinux /firecracker/vmlinux/vmlinux-${KERNEL_VERSION}
+```
+
+### setup CNI
+
+`firebuild` assumes CNI availability. Installing the plugins is very straightforward. Create `/opt/cni/bin/` directory and download the plugins:
+
+```sh
+mkdir -p /opt/cni/bin
+curl -O -L https://github.com/containernetworking/plugins/releases/download/v0.9.1/cni-plugins-linux-amd64-v0.9.1.tgz
+tar -C /opt/cni/bin -xzf cni-plugins-linux-amd64-v0.9.1.tgz
+```
+
+Firecracker also requires the `tc-redirect-tap` plugin. Unfortunately, this one does not offer downloadable binaries and has to be built from sources.
+
+```sh
+mkdir -p $GOPATH/src/github.com/awslabs/tc-redirect-tap
+cd $GOPATH/src/github.com/awslabs/tc-redirect-tap
+git clone https://github.com/awslabs/tc-redirect-tap.git .
+make install
+```
+
+### create a dedicated CNI network for the builds
 
 Feel free to change the `ipam.subnet` or set multiple ones. `host-local` IPAM [CNI plugin documentation](https://www.cni.dev/plugins/ipam/host-local/).
 
@@ -36,32 +164,7 @@ cat <<EOF > /etc/cni/conf.d/machine-builds.conflist
 EOF
 ```
 
-## clone and build from sources
-
-```sh
-mkdir -p $GOPATH/src/github.com/combust-labs/firebuild
-cd $GOPATH/src/github.com/combust-labs/firebuild
-go install
-```
-
-The binary will be placed in `$GOPATH/bin/firebuild`.
-
-## create a profile
-
-```sh
-sudo $GOPATH/bin/firebuild profile-create \
-	--profile=standard \
-	--binary-firecracker=$(readlink /usr/bin/firecracker) \
-	--binary-jailer=$(readlink /usr/bin/jailer) \
-	--chroot-base=/srv/jailer \
-	--run-cache=/var/lib/firebuild \
-	--storage-provider=directory \
-	--storage-provider-property-string="rootfs-storage-root=/firecracker/rootfs" \
-	--storage-provider-property-string="kernel-storage-root=/firecracker/vmlinux" \
-	--tracing-enable
-```
-
-### caution
+#### caution
 
 The [maximum socket path in the Linux Kernel](https://github.com/torvalds/linux/blob/master/include/uapi/linux/un.h) is `107` characters + `\0`:
 
@@ -93,9 +196,13 @@ WARN[0010] firecracker exited: signal: killed
 
 In the above example, the path is `114` characters long. Changing the chroot to `/mnt/sdd1/fc/jail` would solve the problem.
 
-## build the base operating system root file system
+### build the base operating system root file system
 
-Build a base operating system root file system. For example, Debian Buster slim:
+`firebuild` uses the Docker metaphor. An image of an application is built `FROM` a base. An application image can be built `FROM alpine:3.13`, for example. Or `FROM debian:buster-slim`, or `FROM registry.access.redhat.com/ubi8/ubi-minimal:8.3` and dozens others.
+
+In order to fulfill those semantics, a base operating system image must be built before the application root file system can be created.
+
+Build a base Debian Buster slim:
 
 ```sh
 sudo $GOPATH/bin/firebuild baseos \
@@ -105,22 +212,18 @@ sudo $GOPATH/bin/firebuild baseos \
 
 Because the `baseos` root file system is built completely with Docker, there is no need to configure the kernel storage.
 
-It's possible to tag the `baseos` output using the `--tag=` argument, for example:
+**This does not belong here, structure better**: It's possible to tag the `baseos` output using the `--tag=` argument, for example:
 
 ```sh
-sudo /usr/local/go/bin/go run ./main.go baseos \
+sudo $GOPATH/bin/firebuild baseos \
     --profile=standard \
     --dockerfile $(pwd)/baseos/_/debian/buster-slim/Dockerfile \
     --tag=custom/os:latest
 ```
 
-### why is the baseos needed
+### create a Postgres 13 VM rootfs directly from the upstream Dockerfile
 
-`firebuild` uses the Docker metaphor. An image of an application is built `FROM` a base. An application image can be built `FROM alpine:3.13`, for example. Or `FROM debian:buster-slim`, or `FROM registry.access.redhat.com/ubi8/ubi-minimal:8.3` and dozens others.
-
-In order to fulfill those semantics, a base operating system image must be built before the application root file system can be created.
-
-## create a Postgres 13 VM rootfs from Debian Buster Dockerfile
+The upstream `Dockerfile` is built `FROM debian:buster-slim`, that's the `baseos` built in the previous step:
 
 ```sh
 sudo $GOPATH/bin/firebuild rootfs \
@@ -132,7 +235,7 @@ sudo $GOPATH/bin/firebuild rootfs \
     --tag=combust-labs/postgres:13
 ```
 
-## create a separate CNI network for running VMs
+### create a separate CNI network for running VMs
 
 For example:
 
@@ -166,13 +269,14 @@ cat <<EOF > /etc/cni/conf.d/machines.conflist
 EOF
 ```
 
-## run the VM from the resulting tag
+### run the VM from the resulting tag
 
 Once the root file system is built, start the VM:
 
 ```sh
 sudo $GOPATH/bin/firebuild run \
     --profile=standard \
+    --name=postgres1 \
     --from=combust-labs/postgres:13 \
     --cni-network-name=machines \
     --vmlinux-id=vmlinux-v5.8 \
@@ -182,16 +286,25 @@ sudo $GOPATH/bin/firebuild run \
 
 To avoid passing the password on the command line, you can use `--env-file` flag instead. The database is running, to verify:
 
+Fine the IP address of the Postgres VM:
+
 ```sh
-$ nc -zv 192.168.127.94 5432
+VMIP=$(sudo $GOPATH/bin/firebuild inspect \
+    --profile=standard \
+    --vmm-id=postgres1 | jq '.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP' -r)
+```
+
+```sh
+$ nc -zv ${VMIP} 5432
 Connection to 192.168.127.94 5432 port [tcp/postgresql] succeeded!
 ```
 
-If you wish to have SSH access to the VM, use this command instead:
+If SSH access to the VM is required, this command can be used instead:
 
 ```sh
 sudo $GOPATH/bin/firebuild run \
     --profile=standard \
+    --name=postgres2 \
     --from=combust-labs/postgres:13 \
     --cni-network-name=machines \
     --vmlinux-id=vmlinux-v5.8 \
@@ -201,20 +314,21 @@ sudo $GOPATH/bin/firebuild run \
     --identity-file=path/to/the/identity.pub
 ```
 
-### additional settings
+#### additional run flags
 
 - `--daemonize`: when specified, runs the VM in a daemonized mode
 - `--env-file`: full path to the environment file, multiple OK
 - `--env`: environment variable to deploy to configure the VM with, multiple OK, format `--env=VAR_NAME=value`
-- `--hostname`: hostname to apply to the VM
+- `--hostname`: hostname to apply to the VM which the VM uses to resolve itself
+- `--name`: name of the virtual machine, if empty, random string will be used, maxmimum 20 characters, only `a-zA-Z0-9` ranges are allowed
 - `--ssh-user`: username to get access to the VM via SSH with, these are defined in the `baseos` Dockerfiles and follow the EC2 pattern: `alpine` for Alpine images and `debian` for Debian image; together with `--identity-file` allows access to the running VM via SSH
 - `--identity-file`: full path to the publish SSH key to deploy to the running VM
 
-### environment merging
+#### environment merging
 
-The final environment variables are written to `/etc/profile.d/run-env.sh` file. All file specified with `--env-file` are merged first in the order of occurrcence, variables specified with `--env` are merged last.
+The final environment variables are written to `/etc/profile.d/run-env.sh` file. All files specified with `--env-file` are merged first in the order of occurrcence, variables specified with `--env` are merged last.
 
-## build directly from a Docker image
+### build directly from a Docker image
 
 Sometimes having just the `Dockerfile` is not sufficient to execute a `rootfs` build. A good example is this [Jaeger all-in-one `Dockerfile`](https://github.com/jaegertracing/jaeger/blob/master/cmd/all-in-one/Dockerfile). The `Dockerfile` depends on the binary artifact built via `Makefile` prior to Docker build. In this case, it's possible to build the VM rootfs directly from the Docker image:
 
@@ -245,13 +359,13 @@ sudo iptables -t nat -A PREROUTING \
     --to-destination 192.168.127.100:16686
 ```
 
-Where the exact IP address can be obtained using the `firebuild inspect --profile=... --vmm-id=...` command.
+Where the exact IP address can be obtained using the `firebuild inspect --profile=... --vmm-id=...` command and the destination IP and interface depend on your configuration, you can use `ip link` to find the `up broadcast` interfaces and relevant IP address. **Tool intergration will be added at a later stage.**
 
-### how does it work
+#### how does it work
 
 The builder pulls the requested Docker image with Docker. It then open the Docker image via the Docker `save` command and looks up the `manifest.json` and the Docker image config `json` explicitly stated in the manifest. When config is fetched, a temporary Dockerfile is built from the Docker config history. Any `ADD` and `COPY` commands for resources other than first `/` are used to extract files from the saved source image. When resources are exported, the build further continues exactly the same way as in case of the `Dockerfile` build.
 
-## terminating a daemonized VM
+### terminating a daemonized VM
 
 A VM started with the `--daemonize` flag can be stopped in three ways:
 
@@ -259,7 +373,7 @@ A VM started with the `--daemonize` flag can be stopped in three ways:
 - by executing `reboot` from inside of the VM SSH connection; unclean stop, manual purge of the CNI cache, jailer directory, run cache and the veth link is needed
 - by executing the cURL HTTP against the VM socket file; unclean stop, manual purge of the CNI cache, jailer directory, run cache and the veth link is needed
 
-### VM kill command
+#### VM kill command
 
 To get the VM ID, look closely at the output of the `run ... --detached` command:
 
@@ -285,7 +399,7 @@ Copy the VM ID from the output and run:
 sudo $GOPATH/bin/firebuild kill --profile=standard --vmm-id=${VMMID}
 ```
 
-### purging remains of the VMs stopped without the kill command
+#### purging the remains of the VMs stopped without the kill command
 
 If a VM exits in any other way than via `kill` command, following data continues residing on the host:
 
@@ -299,7 +413,7 @@ To remove this data, run the `purge` command.
 sudo $GOPATH/bin/firebuild purge --profile=standard
 ```
 
-### list VMs
+#### list VMs
 
 ```sh
 sudo $GOPATH/bin/firebuild ls --profile=standard
@@ -311,7 +425,7 @@ Example output:
 2021-03-12T01:46:21.752Z [INFO]  ls: vmm: id=df45b6e14538456286e4a4bc1f9bf6e2 running=true pid=20658 image=tests/postgres:13 started="2021-03-12 01:46:11 +0000 UTC" ip-address=192.168.127.9
 ```
 
-## Dockerfile git+http(s):// URL
+### Dockerfile git+http(s):// URL
 
 It's possible to reference a `Dockerfile` residing in the git repository available under a HTTP(s) URL. Here's an example:
 
@@ -339,28 +453,13 @@ And will be processed as:
   - if no `#fragment` is given, the program will use the default cloned branch, check the remote to find out what is it
 - the cloned repository will have a single remote and the first remote wil be used
 
-Git repositories support file modes and the files from the `ADD` and `COPY` directives, will have file info modes applied. Example:
-
-```json
-{
-    "@level":"debug",
-    "@message":"Running remote command",
-    "@module":"build.remote-client.connected-remote-client",
-    "@timestamp":"2021-02-21T13:46:49.152941Z",
-    "command":"sudo mkdir -p / \u0026\u0026 sudo /bin/sh -c 'chmod 0755 /tmp/QdWsoItNoHEOgarVrHGHzWBrEzDhpHMw/TfRemDQEtpRtGKbDEjlPcJvNGDOxJSNu'",
-    "ip-address":"192.168.128.56",
-    "veth-name":"vethkBkhSAovlpr",
-    "vmm-id":"2ad5e481be144d3da7181abf124e23cf"
-}
-```
-
-## supported Dockerfile URL formats
+### supported Dockerfile URL formats
 
 - `http://` and `https://` for direct paths to the `Dockerfile`, these can handle single file only and do not attempt loading any resources handled by `ADD` / `COPY` commands, the server must be capable of responding to `HEAD` and `GET` http requests, more details in `Caveats when building from the URL` further in this document
 - special `git+http://` and `git+https://`, documented above
 - standard `ssh://`, `git://` and `git+ssh://` URL formats with the expectation that the path meets the criteria from the `git+http(s):// URL` section above
 
-## caveats when building from the URL
+### caveats when building from the URL
 
 The `build` command will resolve the resources referenced in `ADD` and `COPY` commands even when loading the `Dockerfile` via the URL. The context root in this case will be established by removing the file name from the URL. An example:
 
@@ -373,7 +472,7 @@ There are following limitations when loading the resources like that via URL:
 - if the `ADD` or `COPY` points to a directory, the command will fail because there is no unified way of loading directories via HTTP, the resolver will not even attempt this, it will most likely fail on the `HTTP GET` request
 - the file permissions will not be carried over because there is no method to infer file mode from a HTTP response
 
-## unsupported Dockerfile features
+### unsupported Dockerfile features
 
 The build program does not support:
 
@@ -381,7 +480,7 @@ The build program does not support:
 - `HEALTHCHECK` commands
 - `STOPSIGNAL` commands
 
-## multi-stage Dockerfile builds
+### multi-stage Dockerfile builds
 
 `firebuild` supports multi-stage `Dockerfile` builds. An example with [grepplabs Kafka Proxy](https://github.com/grepplabs/kafka-proxy).
 
@@ -396,7 +495,9 @@ sudo $GOPATH/bin/firebuild rootfs \
     --tag=combust-labs/kafka-proxy:0.2.8
 ```
 
-## tracing
+### tracing
+
+**TODO: eat your own dog food, start with firebuild.**
 
 Start Jaeger, for example:
 
@@ -423,7 +524,7 @@ And configure respective commands with:
 
 The default value of the `--tracing-collector-host-port` is `127.0.0.1:6831`. To enable tracer log output, set `--tracing-log-enable` flag.
 
-## license
+### license
 
 Unless explcitly stated: AGPL-3.0 License.
 

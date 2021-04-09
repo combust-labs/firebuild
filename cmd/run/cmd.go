@@ -96,6 +96,24 @@ func processCommand() int {
 			WithTypeOverride(profile.Profile().StorageProvider)
 	}
 
+	validatingConfigs := []configs.ValidatingConfig{
+		commandConfig,
+		jailingFcConfig,
+		runCache,
+	}
+
+	for _, validatingConfig := range validatingConfigs {
+		if err := validatingConfig.Validate(); err != nil {
+			rootLogger.Error("configuration is invalid", "reason", err)
+			return 1
+		}
+	}
+
+	// explicitly name the VM, if name given:
+	if commandConfig.Name != "" {
+		jailingFcConfig.WithVMMID(commandConfig.Name)
+	}
+
 	// tracing:
 
 	rootLogger.Trace("configuring tracing", "enabled", tracingConfig.Enable, "application-name", tracingConfig.ApplicationName)
@@ -119,20 +137,6 @@ func processCommand() int {
 		spanRun.SetBaggageItem("error", resolveErr.Error())
 		rootLogger.Error("failed resolving storage provider", "reason", resolveErr)
 		return 1
-	}
-
-	validatingConfigs := []configs.ValidatingConfig{
-		commandConfig,
-		jailingFcConfig,
-		runCache,
-	}
-
-	for _, validatingConfig := range validatingConfigs {
-		if err := validatingConfig.Validate(); err != nil {
-			spanRun.SetBaggageItem("error", resolveErr.Error())
-			rootLogger.Error("configuration is invalid", "reason", err)
-			return 1
-		}
 	}
 
 	spanCacheCreate := tracer.StartSpan("create-cache-dir", opentracing.ChildOf(spanRun.Context()))
