@@ -174,11 +174,13 @@ type RunCommandConfig struct {
 	IdentityFiles []string
 	Hostname      string
 	Name          string
+
+	cmdOverride []string
 }
 
 // NewRunCommandConfig returns new command configuration.
 func NewRunCommandConfig() *RunCommandConfig {
-	return &RunCommandConfig{}
+	return &RunCommandConfig{cmdOverride: []string{}}
 }
 
 // FlagSet returns an instance of the flag set for the configuration.
@@ -190,9 +192,20 @@ func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.From, "from", "", "The image to launch from, for example: tests/postgres:13")
 		c.flagSet.StringArrayVar(&c.IdentityFiles, "identity-file", []string{}, "Full path to the SSH public key to deploy to the machine during bootstrap, must be regular file, multiple OK")
 		c.flagSet.StringVar(&c.Hostname, "hostname", "", "Hostname to apply to the VMM during bootstrap; if empty, a random name will be assigned")
-		c.flagSet.StringVar(&c.Name, "name", "", "Name of the VM, maximum 20 characters; allowed characters: letters, digits, . and -")
+		c.flagSet.StringVar(&c.Name, "name", "", "Name of the VM, maximum 20 characters; allowed characters: letters and digits")
 	}
 	return c.flagSet
+}
+
+// CapturedCmd retrieves the captured command override.
+func (c *RunCommandConfig) CapturedCmd() []string {
+	return c.cmdOverride
+}
+
+// CaptureCmd retrieves the command override from arguments.
+func (c *RunCommandConfig) CaptureCmd(inputargs []string) {
+	c.flagSet.Parse(inputargs)
+	c.cmdOverride = c.flagSet.Args()
 }
 
 // MergedEnvironment returns merged envirionment declared by the configuration.

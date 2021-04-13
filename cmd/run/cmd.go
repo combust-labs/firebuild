@@ -63,11 +63,11 @@ func init() {
 	initFlags()
 }
 
-func run(cobraCommand *cobra.Command, _ []string) {
-	os.Exit(processCommand())
+func run(cobraCommand *cobra.Command, args []string) {
+	os.Exit(processCommand(args))
 }
 
-func processCommand() int {
+func processCommand(args []string) int {
 
 	if commandConfig.Hostname == "" {
 		commandConfig.Hostname = utils.RandomHostname()
@@ -113,6 +113,8 @@ func processCommand() int {
 	if commandConfig.Name != "" {
 		jailingFcConfig.WithVMMID(commandConfig.Name)
 	}
+
+	commandConfig.CaptureCmd(args)
 
 	// tracing:
 

@@ -38,8 +38,8 @@ func NewMachineConfig() *MachineConfig {
 // FlagSet returns an instance of the flag set for the configuration.
 func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 	if c.initFlagSet() {
-		c.flagSet.StringVar(&c.CNINetworkName, "cni-network-name", "", "CNI network within which the build should run. It's recommended to use a dedicated network for build process")
-		c.flagSet.Int64Var(&c.CPU, "cpu", 1, "Number of CPU for the build VMM")
+		c.flagSet.StringVar(&c.CNINetworkName, "cni-network-name", "", "CNI network within which the build should run; it's recommended to use a dedicated network for build process")
+		c.flagSet.Int64Var(&c.CPU, "cpu", 1, "Number of CPUs for the build VMM")
 		c.flagSet.StringVar(&c.CPUTemplate, "cpu-template", "", "CPU template (empty, C2 or T3)")
 		c.flagSet.BoolVar(&c.HTEnabled, "ht-enabled", false, "When specified, enable hyper-threading")
 		c.flagSet.StringVar(&c.KernelArgs, "kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
@@ -50,7 +50,7 @@ func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringVar(&c.VMLinuxID, "vmlinux-id", "", "Kernel ID / name")
 
 		c.flagSet.BoolVar(&c.LogFcHTTPCalls, "log-firecracker-http-calls", false, "If set, logs Firecracker HTTP client calls in debug mode")
-		c.flagSet.IntVar(&c.ShutdownGracefulTimeoutSeconds, "shutdown-graceful-timeout-seconds", 30, "Grafeul shotdown timeout before vmm is stopped forcefully")
+		c.flagSet.IntVar(&c.ShutdownGracefulTimeoutSeconds, "shutdown-graceful-timeout-seconds", 30, "Graceful shutdown timeout before vmm is stopped forcefully")
 	}
 	return c.flagSet
 }

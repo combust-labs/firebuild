@@ -144,7 +144,19 @@ func (r *MDRun) AsMMDS() (interface{}, error) {
 		return nil, errors.Wrap(err, "failed fetching public keys")
 	}
 
-	entrypointJSON, err := r.Rootfs.EntrypointInfo.ToJsonString()
+	entrypoitInfo := &mmds.MMDSRootfsEntrypointInfo{
+		Cmd:        r.Rootfs.EntrypointInfo.Cmd,
+		Entrypoint: r.Rootfs.EntrypointInfo.Entrypoint,
+		Env:        r.Rootfs.EntrypointInfo.Env,
+		Shell:      r.Rootfs.EntrypointInfo.Shell,
+		User:       r.Rootfs.EntrypointInfo.User,
+		Workdir:    r.Rootfs.EntrypointInfo.Workdir,
+	}
+	if len(r.Configs.RunConfig.CapturedCmd()) > 0 {
+		entrypoitInfo.Cmd = r.Configs.RunConfig.CapturedCmd()
+	}
+
+	entrypointJSON, err := entrypoitInfo.ToJsonString()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed fetching public keys")
 	}
