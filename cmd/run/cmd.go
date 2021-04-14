@@ -99,6 +99,7 @@ func processCommand(args []string) int {
 	validatingConfigs := []configs.ValidatingConfig{
 		commandConfig,
 		jailingFcConfig,
+		machineConfig,
 		runCache,
 	}
 

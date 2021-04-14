@@ -73,6 +73,14 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 			CNIConfiguration: &firecracker.CNIConfiguration{
 				NetworkName: c.machineConfig.CNINetworkName,
 				IfName:      c.vethIfaceName,
+				Args: func() [][2]string {
+					if c.machineConfig.IPAddress != "" {
+						return [][2]string{
+							{"IP", c.machineConfig.IPAddress},
+						}
+					}
+					return [][2]string{}
+				}(),
 			},
 		}},
 		VsockDevices: []firecracker.VsockDevice{},
