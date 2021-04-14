@@ -1,17 +1,22 @@
 package configs
 
 import (
+	"fmt"
+	"net"
+
 	"github.com/spf13/pflag"
 )
 
 // MachineConfig provides machine configuration options.
 type MachineConfig struct {
 	flagBase
+	ValidatingConfig `json:"-"`
 
 	CNINetworkName    string `json:"CniNetworkName" mapstructure:"CniNetworkName"`
 	CPU               int64  `json:"CPU" mapstructure:"CPU"`
 	CPUTemplate       string `json:"CPUTemplate" mapstructure:"CPUTemplate"`
 	HTEnabled         bool   `json:"HTEnabled" mapstructure:"HTEnabled"`
+	IPAddress         string `json:"IPAddress" mapstructure:"IPAddress"`
 	KernelArgs        string `json:"KernelArgs" mapstructure:"KernelArgs"`
 	Mem               int64  `json:"Mem" mapstructure:"Mem"`
 	NoMMDS            bool   `json:"NoMMDS" mapstructure:"NoMMDS"` // TODO: remove
@@ -42,6 +47,7 @@ func (c *MachineConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.Int64Var(&c.CPU, "cpu", 1, "Number of CPUs for the build VMM")
 		c.flagSet.StringVar(&c.CPUTemplate, "cpu-template", "", "CPU template (empty, C2 or T3)")
 		c.flagSet.BoolVar(&c.HTEnabled, "ht-enabled", false, "When specified, enable hyper-threading")
+		c.flagSet.StringVar(&c.IPAddress, "ip-address", "", "IP address to try to allocate to the VM; if not given, a new IP will be allocated")
 		c.flagSet.StringVar(&c.KernelArgs, "kernel-args", "console=ttyS0 noapic reboot=k panic=1 pci=off nomodules rw", "Kernel arguments")
 		c.flagSet.Int64Var(&c.Mem, "mem", 128, "Amount of memory for the VMM")
 		c.flagSet.BoolVar(&c.NoMMDS, "no-mmds", false, "If set, disables MMDS")
@@ -86,4 +92,14 @@ func (c *MachineConfig) WithKernelOverride(input string) *MachineConfig {
 func (c *MachineConfig) WithRootfsOverride(input string) *MachineConfig {
 	c.rootfsOverride = input
 	return c
+}
+
+// Validate validates the correctness of the configuration.
+func (c *MachineConfig) Validate() error {
+	if c.IPAddress != "" {
+		if parsedIP := net.ParseIP(c.IPAddress); parsedIP == nil {
+			return fmt.Errorf("value of --ip-address is not an IP address")
+		}
+	}
+	return nil
 }
