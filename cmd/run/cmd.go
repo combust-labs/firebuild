@@ -9,6 +9,7 @@ import (
 
 	"github.com/combust-labs/firebuild-shared/build/commands"
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/fw"
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/profiles"
@@ -321,6 +322,19 @@ func processCommand(args []string) int {
 	spanRun.SetTag("ip", runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
 
 	spanVMMStarted := tracer.StartSpan("run-vmm-started", opentracing.ChildOf(spanVMMStart.Context()))
+
+	if len(commandConfig.Ports) > 0 {
+		// on error, do not fail the complete command, just let it roll
+		portsPublisher, publisherErr := fw.NewPublisher(jailingFcConfig.VMMID(),
+			runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
+		if publisherErr != nil {
+			rootLogger.Warn("ports not published, handling iptables failed", "reason", publisherErr)
+		} else {
+			if err := portsPublisher.Publish(commandConfig.Ports); err != nil {
+				rootLogger.Warn("port publishing failed", "reason", err)
+			}
+		}
+	}
 
 	if err := vmm.WriteMetadataToFile(runMetadata); err != nil {
 		vmmLogger.Error("failed writing machine metadata to file", "reason", err, "metadata", runMetadata)
