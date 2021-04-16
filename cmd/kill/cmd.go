@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/fw"
 	"github.com/combust-labs/firebuild/pkg/profiles"
 	"github.com/combust-labs/firebuild/pkg/tracing"
 	"github.com/combust-labs/firebuild/pkg/utils"
@@ -241,7 +242,36 @@ func processCommand() int {
 
 	spanKillCNI.Finish()
 
-	spanKillCache := tracer.StartSpan("vmm-kill-cache", opentracing.ChildOf(spanKillCNI.Context()))
+	spanKillIPT := tracer.StartSpan("vmm-kill-ipt", opentracing.ChildOf(spanKillCNI.Context()))
+	spanKillIPT.SetTag("vmm-id", vmmMetadata.VMMID)
+
+	if len(vmmMetadata.Configs.RunConfig.Ports) > 0 {
+		if len(vmmMetadata.NetworkInterfaces) > 0 {
+			rootLogger.Info("cleaning up IPT")
+			mgr, err := fw.NewManager(vmmMetadata.VMMID, vmmMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
+			if err != nil {
+				rootLogger.Warn("cleaning up IPT failed", "reason", err)
+			} else {
+				ports := []fw.ExposedPort{}
+				for _, port := range vmmMetadata.Configs.RunConfig.Ports {
+					parsedPort, parseErr := fw.ExposedPortFromString(port)
+					if parseErr != nil {
+						rootLogger.Warn("IP cleanup: port failed to parse", "reason", parseErr, "raw-input", port)
+					} else {
+						ports = append(ports, parsedPort)
+					}
+				}
+				if err := mgr.Unpublish(ports); err != nil {
+					rootLogger.Warn("cleaning up IPT failed", "reason", err)
+				}
+			}
+			rootLogger.Info("IPT cleaned up")
+		}
+	}
+
+	spanKillIPT.Finish()
+
+	spanKillCache := tracer.StartSpan("vmm-kill-cache", opentracing.ChildOf(spanKillIPT.Context()))
 	spanKillCache.SetTag("vmm-id", vmmMetadata.VMMID)
 
 	// have to clean up the cache
