@@ -28,8 +28,8 @@ const (
 
 	// FirebuildFlockDefaultAcquireTimeout is the default timeout value.
 	FirebuildFlockDefaultAcquireTimeout = "10s"
-	// FirebuildFlockFileEnvVarName is the name of the environment variable which can be used to
-	// override the default flock file path.
+	// FirebuildFlockAcquireTimeoutEnvVarName is the name of the environment variable which can be used to
+	// override the default flock acquire timeout.
 	FirebuildFlockAcquireTimeoutEnvVarName = "FIREBUILD_IPT_FLOCK_ACQUIRE_TIMEOUT"
 )
 
