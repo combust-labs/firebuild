@@ -40,7 +40,7 @@ func TestIPTPublishAndCleanup(t *testing.T) {
 
 	os.Setenv(FirebuildIptFilterChainNameEnvVarName, testFilterChainName)
 
-	mgr, err := NewPublisher(vmID, targetAddress)
+	mgr, err := NewManager(vmID, targetAddress)
 	assert.Nil(t, err)
 
 	publishErr := mgr.Publish(ports)
