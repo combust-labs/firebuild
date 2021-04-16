@@ -174,6 +174,7 @@ type RunCommandConfig struct {
 	IdentityFiles []string
 	Hostname      string
 	Name          string
+	Ports         []string
 
 	cmdOverride []string
 }
@@ -193,6 +194,7 @@ func (c *RunCommandConfig) FlagSet() *pflag.FlagSet {
 		c.flagSet.StringArrayVar(&c.IdentityFiles, "identity-file", []string{}, "Full path to the SSH public key to deploy to the machine during bootstrap, must be regular file, multiple OK")
 		c.flagSet.StringVar(&c.Hostname, "hostname", "", "Hostname to apply to the VMM during bootstrap; if empty, a random name will be assigned")
 		c.flagSet.StringVar(&c.Name, "name", "", "Name of the VM, maximum 20 characters; allowed characters: letters and digits")
+		c.flagSet.StringArrayVar(&c.Ports, "port", []string{}, "Ports to expose on the host")
 	}
 	return c.flagSet
 }

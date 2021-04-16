@@ -74,6 +74,14 @@ func CreateRootFSFile(path string, size int) error {
 	return nil
 }
 
+// GetenvOrDefault calls os>lookup for a key and returns a fallback only if variable wasn't set.
+func GetenvOrDefault(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return fallback
+}
+
 // MkfsExt4 uses mkfs.ext4 to create an EXT4 file system in a given file.
 func MkfsExt4(path string) error {
 	exitCode, cmdErr := RunShellCommandNoSudo(fmt.Sprintf("mkfs.ext4 %s", path))

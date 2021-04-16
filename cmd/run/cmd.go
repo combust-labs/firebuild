@@ -9,6 +9,7 @@ import (
 
 	"github.com/combust-labs/firebuild-shared/build/commands"
 	"github.com/combust-labs/firebuild/configs"
+	"github.com/combust-labs/firebuild/pkg/fw"
 	"github.com/combust-labs/firebuild/pkg/metadata"
 	"github.com/combust-labs/firebuild/pkg/naming"
 	"github.com/combust-labs/firebuild/pkg/profiles"
@@ -116,6 +117,16 @@ func processCommand(args []string) int {
 	}
 
 	commandConfig.CaptureCmd(args)
+
+	exposedPorts := []fw.ExposedPort{}
+	for _, exposedPortInput := range commandConfig.Ports {
+		port, portParseErr := fw.ExposedPortFromString(exposedPortInput)
+		if portParseErr != nil {
+			rootLogger.Error("exposed port input is invalid", "reason", portParseErr)
+			return 1
+		}
+		exposedPorts = append(exposedPorts, port)
+	}
 
 	// tracing:
 
@@ -322,6 +333,26 @@ func processCommand(args []string) int {
 
 	spanVMMStarted := tracer.StartSpan("run-vmm-started", opentracing.ChildOf(spanVMMStart.Context()))
 
+	portsCleanupFunc := func() {}
+	if len(commandConfig.Ports) > 0 {
+		// on error, do not fail the complete command, just let it roll
+		portsManager, managerErr := fw.NewManager(jailingFcConfig.VMMID(),
+			runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
+		if managerErr != nil {
+			rootLogger.Warn("ports not published, handling iptables failed", "reason", managerErr)
+		} else {
+			if err := portsManager.Publish(exposedPorts); err != nil {
+				rootLogger.Warn("port publishing failed", "reason", err)
+			} else {
+				portsCleanupFunc = func() {
+					if err := portsManager.Unpublish(exposedPorts); err != nil {
+						rootLogger.Warn("port cleanup failed", "reason", err)
+					}
+				}
+			}
+		}
+	}
+
 	if err := vmm.WriteMetadataToFile(runMetadata); err != nil {
 		vmmLogger.Error("failed writing machine metadata to file", "reason", err, "metadata", runMetadata)
 	}
@@ -335,6 +366,8 @@ func processCommand(args []string) int {
 		cleanup.Trigger(false) // do not trigger cleanup defers
 		return 0
 	}
+
+	cleanup.Add(portsCleanupFunc)
 
 	vmmLogger.Info("VMM running",
 		"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
