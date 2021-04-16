@@ -582,27 +582,29 @@ func ReadImageConfig(ctx context.Context, client *docker.Client, opLogger hclog.
 
 	response := &DockerImageMetadata{}
 
-	if manifests, ok := jsonEntries["manifest.json"]; !ok {
+	manifests, ok := jsonEntries["manifest.json"]
+	if !ok {
 		return nil, fmt.Errorf("no manifest.json")
-	} else {
-		output := []*DockerImageManifest{}
-		if err := json.NewDecoder(bytes.NewBufferString(manifests)).Decode(&output); err != nil {
-			return nil, errors.Wrap(err, "failed deserializing manifest.json")
-		}
-		if len(output) == 0 {
-			return nil, fmt.Errorf("manifest.json without manifests, invalid image?")
-		}
-		response.Manifest = output[0]
 	}
 
-	if imageConfig, ok := jsonEntries[response.Manifest.Config]; !ok {
+	manifestsOutput := []*DockerImageManifest{}
+	if err := json.NewDecoder(bytes.NewBufferString(manifests)).Decode(&manifestsOutput); err != nil {
+		return nil, errors.Wrap(err, "failed deserializing manifest.json")
+	}
+	if len(manifestsOutput) == 0 {
+		return nil, fmt.Errorf("manifest.json without manifests, invalid image?")
+	}
+	response.Manifest = manifestsOutput[0]
+
+	imageConfig, ok := jsonEntries[response.Manifest.Config]
+	if !ok {
 		return nil, fmt.Errorf("manifest.json declared %q as config but config not found in image", response.Manifest.Config)
-	} else {
-		output := &DockerImageConfig{}
-		if err := json.NewDecoder(bytes.NewBufferString(imageConfig)).Decode(&output); err != nil {
-			return nil, errors.Wrapf(err, "failed deserializing config %q", response.Manifest.Config)
-		}
-		response.Config = output
+	}
+
+	response.Config = &DockerImageConfig{}
+
+	if err := json.NewDecoder(bytes.NewBufferString(imageConfig)).Decode(&imageConfig); err != nil {
+		return nil, errors.Wrapf(err, "failed deserializing config %q", response.Manifest.Config)
 	}
 
 	return response, nil

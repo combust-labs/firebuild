@@ -118,6 +118,16 @@ func processCommand(args []string) int {
 
 	commandConfig.CaptureCmd(args)
 
+	exposedPorts := []fw.ExposedPort{}
+	for _, exposedPortInput := range commandConfig.Ports {
+		port, portParseErr := fw.ExposedPortFromString(exposedPortInput)
+		if portParseErr != nil {
+			rootLogger.Error("exposed port input is invalid", "reason", portParseErr)
+			return 1
+		}
+		exposedPorts = append(exposedPorts, port)
+	}
+
 	// tracing:
 
 	rootLogger.Trace("configuring tracing", "enabled", tracingConfig.Enable, "application-name", tracingConfig.ApplicationName)
@@ -330,7 +340,7 @@ func processCommand(args []string) int {
 		if publisherErr != nil {
 			rootLogger.Warn("ports not published, handling iptables failed", "reason", publisherErr)
 		} else {
-			if err := portsPublisher.Publish(commandConfig.Ports); err != nil {
+			if err := portsPublisher.Publish(exposedPorts); err != nil {
 				rootLogger.Warn("port publishing failed", "reason", err)
 			}
 		}
