@@ -333,15 +333,22 @@ func processCommand(args []string) int {
 
 	spanVMMStarted := tracer.StartSpan("run-vmm-started", opentracing.ChildOf(spanVMMStart.Context()))
 
+	portsCleanupFunc := func() {}
 	if len(commandConfig.Ports) > 0 {
 		// on error, do not fail the complete command, just let it roll
-		portsPublisher, publisherErr := fw.NewPublisher(jailingFcConfig.VMMID(),
+		portsManager, managerErr := fw.NewManager(jailingFcConfig.VMMID(),
 			runMetadata.NetworkInterfaces[0].StaticConfiguration.IPConfiguration.IP)
-		if publisherErr != nil {
-			rootLogger.Warn("ports not published, handling iptables failed", "reason", publisherErr)
+		if managerErr != nil {
+			rootLogger.Warn("ports not published, handling iptables failed", "reason", managerErr)
 		} else {
-			if err := portsPublisher.Publish(exposedPorts); err != nil {
+			if err := portsManager.Publish(exposedPorts); err != nil {
 				rootLogger.Warn("port publishing failed", "reason", err)
+			} else {
+				portsCleanupFunc = func() {
+					if err := portsManager.Unpublish(exposedPorts); err != nil {
+						rootLogger.Warn("port cleanup failed", "reason", err)
+					}
+				}
 			}
 		}
 	}
@@ -359,6 +366,8 @@ func processCommand(args []string) int {
 		cleanup.Trigger(false) // do not trigger cleanup defers
 		return 0
 	}
+
+	cleanup.Add(portsCleanupFunc)
 
 	vmmLogger.Info("VMM running",
 		"jailer-dir", jailingFcConfig.JailerChrootDirectory(),
