@@ -99,8 +99,7 @@ The examples use the 5.8 Linux kernel image which is built using the configurati
 ```sh
 export KERNEL_VERSION=v5.8
 mkdir -p /tmp/linux && cd /tmp/linux
-git clone https://github.com/torvalds/linux.git .
-git checkout ${KERNEL_VERSION}
+git clone -b ${KERNEL_VERSION} --depth 1 https://github.com/torvalds/linux.git .
 wget -O .config https://raw.githubusercontent.com/combust-labs/firebuild/master/baseos/kernel/5.8.config
 make vmlinux -j32 # adapt to the number of cores you have
 ```
