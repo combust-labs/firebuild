@@ -546,7 +546,7 @@ func processCommand() int {
 
 	vmmLogger := rootLogger.With("vmm-id", jailingFcConfig.VMMID(), "veth-name", vethIfaceName)
 
-	vmmLogger.Info("buildiing VMM",
+	vmmLogger.Info("building VMM",
 		"dockerfile", commandConfig.Dockerfile,
 		"kernel-path", resolvedKernel.HostPath(),
 		"source-rootfs", machineConfig.RootfsOverride(),
