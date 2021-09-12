@@ -289,7 +289,7 @@ func processCommand() int {
 
 	spanRootfsMkfs.Finish()
 
-	rootLogger.Info("EXT4 file system created, mouting", "path", rootFSFile, "size-mb", commandConfig.FSSizeMBs)
+	rootLogger.Info("EXT4 file system created, mounting", "path", rootFSFile, "size-mb", commandConfig.FSSizeMBs)
 
 	spanMountRootfs := tracer.StartSpan("baseos-mount-rootfs", opentracing.ChildOf(spanRootfsMkfs.Context()))
 
