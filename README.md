@@ -2,7 +2,7 @@
 
 With firebuild, you can build and deploy secure VMs directly from `Dockerfiles` and Docker images in just few minutes.
 
-The concept of `firebuild` is to leverage as much of the existing Docker world as possible. There are thousands of Docker images out there. Docker images are awesome because they encapsulate the software we want to run in our workloads, they also encapsulate dependencies. Dockerfiles are what Docker images are built from. Dockeriles are the blueprints of the modern infrastructure. There are thousands of them for almost anything one can imagine and new ones are very easy to write.
+The concept of `firebuild` is to leverage as much of the existing Docker world as possible. There are thousands of Docker images out there. Docker images are awesome because they encapsulate the software we want to run in our workloads, they also encapsulate dependencies. Dockerfiles are what Docker images are built from. Dockerfiles are the blueprints of the modern infrastructure. There are thousands of them for almost anything one can imagine and new ones are very easy to write.
 
 With firebuild it is possible to:
 
