@@ -562,7 +562,7 @@ func processCommand() int {
 		span.Finish()
 	})
 
-	strategy := configs.DefaultFirectackerStrategy(machineConfig).
+	strategy := configs.DefaultFirecrackerStrategy(machineConfig).
 		AddRequirements(func() *arbitrary.HandlerPlacement {
 			// add this one after the previous one so by he logic,
 			// this one will be placed and executed before the first one
