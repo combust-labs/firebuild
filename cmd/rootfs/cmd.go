@@ -546,7 +546,7 @@ func processCommand() int {
 
 	vmmLogger := rootLogger.With("vmm-id", jailingFcConfig.VMMID(), "veth-name", vethIfaceName)
 
-	vmmLogger.Info("buildiing VMM",
+	vmmLogger.Info("building VMM",
 		"dockerfile", commandConfig.Dockerfile,
 		"kernel-path", resolvedKernel.HostPath(),
 		"source-rootfs", machineConfig.RootfsOverride(),
@@ -562,7 +562,7 @@ func processCommand() int {
 		span.Finish()
 	})
 
-	strategy := configs.DefaultFirectackerStrategy(machineConfig).
+	strategy := configs.DefaultFirecrackerStrategy(machineConfig).
 		AddRequirements(func() *arbitrary.HandlerPlacement {
 			// add this one after the previous one so by he logic,
 			// this one will be placed and executed before the first one

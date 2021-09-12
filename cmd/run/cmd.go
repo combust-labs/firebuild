@@ -278,7 +278,7 @@ func processCommand(args []string) int {
 		Type:     metadata.MetadataTypeRun,
 	}
 
-	vmmStrategy := configs.DefaultFirectackerStrategy(machineConfig).
+	vmmStrategy := configs.DefaultFirecrackerStrategy(machineConfig).
 		AddRequirements(func() *arbitrary.HandlerPlacement {
 			// add this one after the previous one so by he logic,
 			// this one will be placed and executed before the first one

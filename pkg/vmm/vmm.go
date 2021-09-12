@@ -49,7 +49,7 @@ func NewDefaultProvider(cniConfig *configs.CNIConfig, jailingFcConfig *configs.J
 		jailingFcConfig: jailingFcConfig,
 		machineConfig:   machineConfig,
 
-		handlersAdapter: configs.DefaultFirectackerStrategy(machineConfig),
+		handlersAdapter: configs.DefaultFirecrackerStrategy(machineConfig),
 		logger:          hclog.Default(),
 		vethIfaceName:   configs.DefaultVethIfaceName,
 	}

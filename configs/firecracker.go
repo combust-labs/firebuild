@@ -13,8 +13,8 @@ import (
 // DefaultVethIfaceName is the default veth interface name.
 const DefaultVethIfaceName = "veth0"
 
-// DefaultFirectackerStrategy returns an instance of the default Firecracker Jailer strategy for a given machine config.
-func DefaultFirectackerStrategy(machineConfig *MachineConfig) arbitrary.PlacingStrategy {
+// DefaultFirecrackerStrategy returns an instance of the default Firecracker Jailer strategy for a given machine config.
+func DefaultFirecrackerStrategy(machineConfig *MachineConfig) arbitrary.PlacingStrategy {
 	return arbitrary.NewStrategy(func() *arbitrary.HandlerPlacement {
 		return arbitrary.NewHandlerPlacement(firecracker.
 			LinkFilesHandler(filepath.Base(machineConfig.KernelOverride())),
@@ -101,7 +101,7 @@ func (c *defaultFcConfigProvider) ToSDKConfig() firecracker.Config {
 			Daemonize:     c.machineConfig.Daemonize(),
 			ChrootStrategy: func() firecracker.HandlersAdapter {
 				if c.fcStrategy == nil {
-					return DefaultFirectackerStrategy(c.machineConfig)
+					return DefaultFirecrackerStrategy(c.machineConfig)
 				}
 				return c.fcStrategy
 			}(),
